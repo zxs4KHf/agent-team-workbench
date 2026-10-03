@@ -100,7 +100,10 @@ def review_now(task_id: str = "", by: str = "user", ttl_min: int = 15) -> dict:
             return {"dispatched": [], "skipped": [], "errors": [{"task_id": task_id, "error": f"施工人 {who} 还没交提交，没有东西可审；先改派施工或取消这张单"}]}
     dispatched, skipped, errors = [], [], []
     for tid, mate in targets:
-        live = "" if replaced else _live_review_for(tid, mate, reviews)
+        # 换人重派也要去重，只是把被替换的那张旧单排除在外（c204：原来这条路径整个跳过去重，守护每圈给同一对象再派一张，
+        # 56 秒里同一施工对象被派审 4 次）
+        gone = {m.get("id") for m in replaced}
+        live = _live_review_for(tid, mate, [x for x in reviews if x[0].get("id") not in gone])
         if live:
             skipped.append({"task_id": tid, "teammate": mate, "reason": f"已有审查在进行（{live}）"})
             continue

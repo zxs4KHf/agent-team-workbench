@@ -26,6 +26,12 @@ import argparse, datetime as dt, json, os, shutil, subprocess, sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 from bus_locks import atomic_write_json, file_mutex  # noqa: E402  与 bus_build_safety 共用记录锁
+import bus_core as B  # noqa: E402  时间一律走 parse_ts（ADR 0010：时间戳带偏移；旧的无偏移写法按本机时区兜底）
+
+
+def _aware(now):
+    """调用方可能传无时区的 datetime（老测试 / 手工调用）：补成本机时区，和带偏移的时间戳才能相减。"""
+    return now if now.tzinfo else now.astimezone()
 
 CONFLICT_CODES = {"DD", "AU", "UD", "UA", "DU", "AA", "UU"}
 
@@ -111,10 +117,11 @@ def active_task_ids(state_root, now, days=2.0):
         try:
             with open(os.path.join(peers, f), encoding="utf-8") as fh:
                 hb = json.load(fh) or {}
-            seen = dt.datetime.fromisoformat(hb.get("last_seen", ""))
+            seen = B.parse_ts(hb.get("last_seen", ""))
         except (OSError, ValueError, TypeError):
             continue
-        if hb.get("task_id") and (now - seen).total_seconds() < 86400:
+        # 2026-10-02：心跳时间带偏移后，原来的 fromisoformat 得到带时区的值，和不带时区的 now 相减直接 TypeError，整个脚本跑不起来
+        if seen is not None and hb.get("task_id") and (_aware(now) - seen).total_seconds() < 86400:
             busy.add(str(hb["task_id"]))
     return busy
 
@@ -125,10 +132,8 @@ def skip_reason(tid, rec, members, busy, now, days):
             return f"{n} 审查已通过、待合并"
     if tid in busy:
         return "有成员正在做（inbox 已领取或心跳报告本单）"
-    try:
-        created = dt.datetime.fromisoformat(rec.get("created", "")).timestamp()
-    except ValueError:
-        created = 0
+    c = B.parse_ts(rec.get("created", ""))
+    created = c.timestamp() if c else 0
     last = max([created] + [m["last_commit"] for m in members.values()] + [m["last_mtime"] for m in members.values()])
     idle = (now.timestamp() - last) / 86400
     if idle < days:

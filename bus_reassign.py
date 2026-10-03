@@ -129,7 +129,7 @@ def free_stalled(by: str = "guard", min_age: float = STALL_FREE_SEC) -> dict:
                     moved.append({**it, "to": "、".join(r["dispatched"][0]["reviewers"])})
                     continue
             meta = B.read_json(os.path.join(B.OUTBOX, f"{tid}.meta.json"), None) or {}
-            target = pick_free_target(who, exclude=list(meta.get("peers") or []) + [who])
+            target = pick_free_target(who, exclude=list(meta.get("peers") or []) + [who, B.review_author(meta)])
             if target:
                 moved.append({**it, "to": B.reassign(tid, who, to_peer=target, by=by)["to"]})
             elif it["kind"] == "queued":

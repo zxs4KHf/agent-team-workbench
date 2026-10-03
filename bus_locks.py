@@ -81,6 +81,35 @@ def file_mutex(path, timeout=10.0):
             fh.close()
         lock.release()
 
+def _replace_posix(src, dst):
+    """Windows：用 POSIX 语义改名覆盖目标（Win10 1709+，FileRenameInfoEx + FILE_RENAME_FLAG_POSIX_SEMANTICS）。
+    普通 os.replace（MoveFileEx）只要目标被别人打开着就拒绝，工作台每秒读决策表、写方 1 秒内 6 次重试全失败（2026-10-03 实测）；
+    POSIX 语义下，读方只要用 FILE_SHARE_DELETE 打开（bus_core._open_shared），替换照常成功，读方拿到的是打开那一刻的旧内容。
+    不支持（老系统、非 NTFS）时返回 False，由调用方退回 os.replace。"""
+    import ctypes
+    from ctypes import wintypes
+    k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    k32.CreateFileW.restype = wintypes.HANDLE
+    k32.CreateFileW.argtypes = (wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, wintypes.LPVOID, wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE)
+    k32.SetFileInformationByHandle.argtypes = (wintypes.HANDLE, ctypes.c_int, wintypes.LPVOID, wintypes.DWORD)
+    k32.SetFileInformationByHandle.restype = wintypes.BOOL
+    DELETE, SHARE_ALL, OPEN_EXISTING, NORMAL = 0x10000, 0x1 | 0x2 | 0x4, 3, 0x80
+    FileRenameInfoEx, REPLACE_IF_EXISTS, POSIX_SEMANTICS = 22, 0x1, 0x2
+    h = k32.CreateFileW(src, DELETE, SHARE_ALL, None, OPEN_EXISTING, NORMAL, None)
+    if h in (None, wintypes.HANDLE(-1).value):
+        return False
+    try:
+        name = os.fspath(dst)
+
+        class Info(ctypes.Structure):
+            _fields_ = [("Flags", wintypes.DWORD), ("RootDirectory", wintypes.HANDLE), ("FileNameLength", wintypes.DWORD),
+                        ("FileName", wintypes.WCHAR * (len(name) + 1))]
+        info = Info(REPLACE_IF_EXISTS | POSIX_SEMANTICS, None, len(name) * 2, name)
+        return bool(k32.SetFileInformationByHandle(h, FileRenameInfoEx, ctypes.byref(info), ctypes.sizeof(info)))
+    finally:
+        k32.CloseHandle(h)
+
+
 def atomic_write_json(path, data, retries=6):
     """Unique temp + fsync + replace; failures propagate, never false success.
 
@@ -99,6 +128,8 @@ def atomic_write_json(path, data, retries=6):
             os.fsync(stream.fileno())
         for attempt in range(max(1, retries)):
             try:
+                if os.name == "nt" and _replace_posix(tmp, path):
+                    return
                 os.replace(tmp, path)
                 return
             except PermissionError:

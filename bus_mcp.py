@@ -449,6 +449,14 @@ def public_hosts() -> list:
     return sorted(set(h for h in hosts if h not in ("127.0.0.1", "localhost")))
 
 
+def stateless() -> bool:
+    """无状态模式（默认开，2026-10-02 查 Agent 掉线）：有状态模式下服务端发会话号，闲置 30 分钟（SDK 默认
+    session_idle_timeout）或 MCP 重启后会话号失效，Agent 下一次调用收到 404「Session not found」，很多宿主就此断开。
+    我们的工具每次调用都独立（bus_tool 子进程，Leader 的多会话用工具参数 session 区分），不依赖 MCP 会话；
+    无状态下不发会话号，宿主手里旧的会话号也直接被接受——重启、闲置都不再掉线。BUS_MCP_STATEFUL=1 切回旧行为。"""
+    return os.environ.get("BUS_MCP_STATEFUL", "") not in ("1", "true", "yes")
+
+
 def build_app(token: str):
     kw: dict[str, Any] = {}
     if TransportSecuritySettings is not None:  # Named hostname and loopback only; Bearer authentication remains mandatory
@@ -457,17 +465,18 @@ def build_app(token: str):
                                                              allowed_origins=[*(f"https://{h}" for h in public), "http://127.0.0.1:*", "http://localhost:*"])
     if _SDK == 1:
         mcp.settings.streamable_http_path = "/mcp"
+        mcp.settings.stateless_http = stateless()
         for k, v in kw.items():
             setattr(mcp.settings, k, v)
         app = mcp.streamable_http_app()
     else:
-        app = mcp.streamable_http_app(streamable_http_path="/mcp", host="0.0.0.0", **kw)
+        app = mcp.streamable_http_app(streamable_http_path="/mcp", host="0.0.0.0", stateless_http=stateless(), **kw)
 
     from starlette.responses import JSONResponse
     from starlette.routing import Route
 
     async def health(_):
-        return JSONResponse({"ok": True, "service": "bus_mcp", "sdk": _SDK, "version": SERVICE_VERSION,
+        return JSONResponse({"ok": True, "service": "bus_mcp", "sdk": _SDK, "version": SERVICE_VERSION, "stateless": stateless(),
                              "pid": os.getpid(), "uptime_sec": int(time.time() - STARTED_AT),
                              "workspace": B.WORKSPACE, "runtime": RX.self_check()})
 

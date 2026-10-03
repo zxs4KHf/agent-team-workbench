@@ -42,7 +42,14 @@ function sendSignature(f) {
   // sota2 0e85：时限也是派发内容的一部分，改了必须重新确认 / 上传后中止
   return JSON.stringify([f.project || S().project, [...new Set(f.peers || [])].sort(), String(f.question || '').trim(), f.mode || '', [...(f.context_files || [])].sort(), clamp(Number(f.ttl_min) || 30, 1, 1440)]);
 }
+let dispatching = false;
+// 派发在途时再提交一律忽略（Ctrl+Enter 连按、确认条和按钮同时点）；真正的提交逻辑在 doSubmitDispatch
 export async function submitDispatch(f, btn, confirmSig = null) {
+  if (dispatching) return;
+  dispatching = true;
+  try { return await doSubmitDispatch(f, btn, confirmSig); } finally { dispatching = false; }
+}
+async function doSubmitDispatch(f, btn, confirmSig = null) {
   // compose 页与快速抽屉共用的唯一提交点：只读 F.composer，不碰任何表单 DOM
   // 44f1：入口先取出并作废凭据、撤掉旧提示条——缺问题 / 缺人 / 上传失败等任何早退都不留下发送权限
   const issued = F.sendConfirm; F.sendConfirm = null; clearSendConfirm();

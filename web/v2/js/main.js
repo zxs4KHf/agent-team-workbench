@@ -348,6 +348,12 @@ export const ACTIONS = {
   },
   // 唤醒掉线的 Agent（app-wake.js）：按钮文字跟着结果变，醒没醒看心跳
   'wake-peer': async t => { t.classList.add('busy'); try { const r = await wakePeer(t.dataset.peer); if (r !== 'shown' && t.isConnected) t.lastChild.textContent = r === 'sent' ? '已发送，等心跳' : '已复制，去粘贴'; } catch (e) { notify.error(e); } finally { t.classList.remove('busy'); } },
+  'lead-handback': async t => {
+    if (!(await confirmDialog({ title: '收回 Leader', body: '代理 Leader 下一次等待指令时交回租约（5 分钟内有效）；之后指令由真 Leader 处理。', confirmText: '收回' }))) return;
+    t.classList.add('busy');
+    try { const r = await api('/api/handback', { method: 'POST', body: '{}' }); toast(`已请求 ${displayName(r.holder)} 交回 Leader，它下一次等待指令时交回`, 'ok', { ms: 5000 }); await refresh(true); }
+    catch (e) { notify.error(e); } finally { t.classList.remove('busy'); }
+  },
   'wake-all': () => openWakeAll(), 'wake-auto-all': t => wakeAutoAll(t),
   'edit-agent': t => openAgentEditor(t.dataset.peer), 'join-peer': t => openJoin('peer', t.dataset.peer || '', t.dataset.model || ''), 'join-controller': () => openJoin('controller'),
   'add-team-row': () => $('#teamRows').insertAdjacentHTML('beforeend', teamRow({}, $$('[data-team-row]').length)),
@@ -382,6 +388,11 @@ export const ACTIONS = {
   'handoff-finish': async t => { const done = t.dataset.result === 'done'; if (done && !(await confirmDialog({ title: '确认已完成这一步？', body: '确认后该决策标记为已落地（execution=released）。', confirmText: '已完成' }))) return; t.classList.add('busy'); try { await api('/api/decision/handoff-finish', { method: 'POST', body: JSON.stringify({ project: S().project, task_id: t.dataset.id, result: done ? 'done' : 'failed', by: 'user' }) }); toast(done ? '已记为落地' : '已退回 Agent 处理中', done ? 'ok' : 'warn'); await refresh(true); } catch (e) { notify.error(e); } finally { t.classList.remove('busy'); } },
   'spawn-child': async t => { const r0 = await confirmDialog({ title: '开关联子单', body: '失败且需要你决策时使用：不取消原施工，同一原因不会重复开单，每单最多 3 条。', confirmText: '开子单', input: { label: '失败原因与需要你决定的事', required: true, maxlength: 1000 } }); const reason = r0 && r0.ok ? r0.value : ''; if (reason.trim().length < 4) return; t.classList.add('busy'); try { const r = await api('/api/decision/child', { method: 'POST', body: JSON.stringify({ project: S().project, task_id: t.dataset.id, reason, kind: 'redecide', by: 'user' }) }); toast(r.dedup ? `未新建：${r.note}` : `已开子单 ${r.task_id}`, r.dedup ? 'warn' : 'ok'); await refresh(true); openDecision(r.task_id); } catch (e) { notify.error(e); } finally { t.classList.remove('busy'); } },
   'resolve-decision': async t => { t.classList.add('busy'); try { const r = await api('/api/decision/resolve', { method: 'POST', body: JSON.stringify({ project: S().project, task_id: t.dataset.id, by: 'user' }) }); toast(r.ok ? '已回到 Agent 处理中' : `仍有未定夺的子单：${(r.open || []).join('、')}`, r.ok ? 'ok' : 'warn'); await refresh(true); } catch (e) { notify.error(e); } finally { t.classList.remove('busy'); } },
+  'implement-direct': async t => {
+    t.classList.add('busy');
+    try { const r = await api('/api/implement/direct', { method: 'POST', body: JSON.stringify({ project: S().project, task_id: t.dataset.id }) }); toast(r.note, r.direct ? 'ok' : 'warn', { ms: r.direct ? 4000 : 7000 }); await refresh(true); }
+    catch (e) { notify.error(e); } finally { t.classList.remove('busy'); }
+  },
   'implement-nudge': async t => { t.classList.add('busy'); try { const r = await api('/api/command', { method: 'POST', body: JSON.stringify({ kind: 'implement_nudge', payload: { project: S().project, task_id: t.dataset.id } }) }); toast(r.dedup ? `未新建：${r.note}` : r.note, r.dedup ? 'warn' : 'ok'); await refresh(true); } catch (e) { notify.error(e); } finally { t.classList.remove('busy'); } },
   // 第 6 步「看不懂」：排一条 brief_rewrite 指令给 Leader（带任务号 + 卡面这句话），卡片标「待重写」；已排过的不重复排
   'brief-confusing': async t => { t.classList.add('busy'); try { const r = await api('/api/decision/brief-rewrite', { method: 'POST', body: JSON.stringify({ project: t.dataset.project || S().project, task_id: t.dataset.id, shown: t.dataset.shown || '', by: 'user' }) }); toast(r.dedup ? `未重复发送：${r.note}` : r.note, r.dedup ? 'warn' : 'ok'); await refresh(true); if (F.drawer.kind === 'decision' && F.drawer.key === t.dataset.id) openDecision(t.dataset.id); } catch (e) { notify.error(e); } finally { t.classList.remove('busy'); } },
@@ -490,7 +501,24 @@ function bind() {
   const DRAG = { sel: '', id: '', attr: '' };
   const flip = (container, mutate) => { const kids = [...container.children]; const first = new Map(kids.map(k => [k, k.getBoundingClientRect()])); mutate(); kids.forEach(k => { const a = first.get(k), b = k.getBoundingClientRect(); const dx = a.left - b.left, dy = a.top - b.top; if (!dx && !dy) return; k.style.transition = 'none'; k.style.transform = `translate(${dx}px,${dy}px)`; requestAnimationFrame(() => { k.style.transition = 'transform .22s cubic-bezier(.2,.8,.2,1)'; k.style.transform = ''; }); }); };
   document.addEventListener('dragstart', e => { const sec = e.target.closest?.('.group-section, .relay-item, .task'); if (!sec) return; DRAG.sel = sec.matches('.group-section') ? '.group-section' : sec.matches('.relay-item') ? '.relay-item' : '.task'; DRAG.attr = { '.group-section': 'group', '.relay-item': 'relayItem', '.task': 'key' }[DRAG.sel]; DRAG.id = sec.dataset[DRAG.attr]; e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', DRAG.id); requestAnimationFrame(() => sec.classList.add('dragging')); });
-  document.addEventListener('dragover', e => { if (!DRAG.id) return; const sec = e.target.closest?.(DRAG.sel); if (!sec || sec.dataset[DRAG.attr] === DRAG.id) { if (e.target.closest?.('#groupSections, #relayList, #taskList')) e.preventDefault(); return; } e.preventDefault(); const src = sec.parentElement.querySelector(`${DRAG.sel}.dragging`); if (!src || src === sec) return; const box = sec.getBoundingClientRect(); const horizontal = DRAG.sel === '[data-group-card]'; const before = horizontal ? (e.clientX < box.left + box.width / 2) : (e.clientY < box.top + box.height / 2); const nextSibling = before ? sec : sec.nextElementSibling; if (src.nextElementSibling === nextSibling) return; flip(sec.parentElement, () => sec.parentElement.insertBefore(src, nextSibling)); });
+  // 拖到滚动区边缘时自动滚动（a963 第③项）：Agent 页网格在面板里滚动（ADR 0015），不滚就放不到看不见的位置。
+  // dragover 在悬停时持续触发（约每 50ms），每次按离边缘的距离滚一小段，越靠边越快
+  const scroller = el => { for (let n = el; n && n !== document.body; n = n.parentElement) { const s = getComputedStyle(n); if (/(auto|scroll)/.test(s.overflowY) && n.scrollHeight > n.clientHeight) return n; } return document.scrollingElement; };
+  const edgeScroll = e => {
+    const box = scroller(e.target); const r = box === document.scrollingElement ? { top: 0, bottom: innerHeight } : box.getBoundingClientRect(); const EDGE = 56;
+    const dy = e.clientY < r.top + EDGE ? -(r.top + EDGE - e.clientY) : e.clientY > r.bottom - EDGE ? e.clientY - (r.bottom - EDGE) : 0;
+    if (dy) box.scrollBy(0, Math.round(dy / 3));
+  };
+  document.addEventListener('dragover', e => {
+    if (!DRAG.id) return; edgeScroll(e);
+    const sec = e.target.closest?.(DRAG.sel); if (!sec || sec.dataset[DRAG.attr] === DRAG.id) { if (e.target.closest?.('#groupSections, #relayList, #taskList')) e.preventDefault(); return; }
+    e.preventDefault(); const src = sec.parentElement.querySelector(`${DRAG.sel}.dragging`); if (!src || src === sec) return;
+    // 网格（分组卡一行多张）：同一行里看左右，换行看上下；列表只看上下
+    const box = sec.getBoundingClientRect(), sameRow = Math.abs(box.top - src.getBoundingClientRect().top) < box.height / 2;
+    const before = sameRow && DRAG.sel === '.group-section' ? (e.clientX < box.left + box.width / 2) : (e.clientY < box.top + box.height / 2);
+    const nextSibling = before ? sec : sec.nextElementSibling; if (src.nextElementSibling === nextSibling) return;
+    flip(sec.parentElement, () => sec.parentElement.insertBefore(src, nextSibling));
+  });
   document.addEventListener('drop', e => { if (DRAG.id) e.preventDefault(); });
   document.addEventListener('dragend', () => { if (!DRAG.id) return; const src = document.querySelector(`${DRAG.sel}.dragging`); if (src) src.classList.remove('dragging'); const ids = $$(DRAG.sel).map(x => x.dataset[DRAG.attr]).filter(x => x && x !== '_other'); const kind = DRAG.sel; DRAG.id = ''; if (kind === '.relay-item') return commitRelayOrder(ids, '顶替顺序已保存');  /* 服务端配置：走 /api/priority 带 rev */ if (kind === '.task') { DRAG.lastEnd = Date.now(); return commitTaskOrder(mergeVisibleOrder(taskOrder(), ids)); }  /* 只改可见子集在完整表里的位置，不可见 / 非 running 项保留 */  /* 任务处理顺序：同一份 priority.json，同样带 rev */ if (kind === '.group-section') saveGroupOrder(ids);  /* 本机 localStorage 偏好 */ DRAG.id = ''; });
   let downEl = null; document.addEventListener('pointerdown', e => { downEl = e.target; }, true);
@@ -500,6 +528,7 @@ function bind() {
     if (e.target.closest?.('[data-task-drag]')) return;  // 手柄只用于拖动 / 键盘调序，点它不展开行；不在捕获阶段吞全局 click
     const t = resolveAction(e.target, e.detail === 0 ? null : downEl, selectionAnchor(window)); if (!t) return;  // 键盘 / el.click()（detail=0）不看陈旧 pointerdown
     if (t.matches('input[type=color],input[type=range]')) return; // 取色器与滑块由 input（预览）+ change（落盘）处理（F1：9c53ead 解冲突时丢失，按 ef9ced7 原样补回）
+    if (t.classList.contains('busy')) { e.preventDefault(); return; }   // 正在处理：键盘回车不受 pointer-events 限制，也要挡
     const fn = ACTIONS[t.dataset.action]; if (fn) { e.__busHandled = true; e.preventDefault(); fn(t, e); }
   });
   document.addEventListener('change', e => {
@@ -521,7 +550,14 @@ function bind() {
   document.addEventListener('click', e => { if (e.__busHandled || e.defaultPrevented) return; const b = e.target.closest('[data-filter-status]'); if (b) { e.__busHandled = true; F.filters.decisionStatus = b.dataset.filterStatus; url.set({ status: b.dataset.filterStatus }); renderView(S()); } });
   // 「只看卡住」：概览行动条「卡住的施工」带 on 直达（捕获阶段先设好筛选，再由它自己的 data-action="view" 渲染）；进行中页的筛选片带 toggle
   document.addEventListener('click', e => { const b = e.target.closest('[data-filter-stuck]'); if (!b) return; const mode = b.dataset.filterStuck; toggleStuck(mode); const apply = () => url.set({ stuck: F.filters.runningStuck ? '1' : '' }, true); if (mode === 'on') setTimeout(apply, 0); else apply(); /* on=行动条直达：等 data-action="view" 切完视图再写，stuck 不挂在概览的历史项上（fable2 0c0f）；不用微任务——真实点击时它在两个监听之间就执行 */ if (mode === 'toggle') { e.__busHandled = true; renderView(S()); } }, true);
-  document.addEventListener('submit', e => { const form = e.target.closest('form[data-form]'); if (!form) return; e.preventDefault(); FORMS[form.dataset.form]?.(form); });
+  // 提交防重复（2026-10-02 接手积压：重派弹层连点派出两次，da1c 系列；全站表单原来都没防）：同一张表单在途时再提交一律忽略
+  document.addEventListener('submit', async e => {
+    const form = e.target.closest('form[data-form]'); if (!form) return; e.preventDefault();
+    const fn = FORMS[form.dataset.form]; if (!fn || form.dataset.inflight) return;
+    const btn = e.submitter || form.querySelector('[type=submit]');
+    form.dataset.inflight = '1'; btn?.classList.add('busy');
+    try { await fn(form); } finally { delete form.dataset.inflight; btn?.classList.remove('busy'); }
+  });
   document.addEventListener('keydown', e => {
     const t = e.target;
     if (S().view === 'history' && historyKeydown(e)) return;  // 任务历史列表：上下键移焦点、Enter 打开详情
@@ -539,7 +575,7 @@ function bind() {
       return;
     }
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); cmdkOpen() ? closeCmdk() : openCmdk(); return; }
-    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter' && t.closest('#composerForm, #qdQuestion, form[data-form="dispatch"]')) { e.preventDefault(); const qd = t.closest('form[data-form="dispatch"]'); qd ? FORMS.dispatch(qd) : submitComposer($('#composerForm')); return; }
+    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter' && t.closest('#composerForm, #qdQuestion, form[data-form="dispatch"]')) { e.preventDefault(); const qd = t.closest('form[data-form="dispatch"]'); (qd || $('#composerForm'))?.requestSubmit(); return; }
     if (e.key === 'Escape') { if (cmdkOpen()) closeCmdk(); else if (drawerOpen()) { releaseAttachments(F.followup); closeDrawer(); } return; }
     const dv = digitView(e, NAV); if (dv) { if (isTypingTarget(t)) return; e.preventDefault(); switchView(dv); return; }  // Alt+数字 切视图
     if (!shortcutAllowed(e, { drawerOpen: drawerOpen(), cmdkOpen: cmdkOpen(), dialogOpen: $('#dialog').classList.contains('show') })) return;
@@ -710,7 +746,8 @@ Object.assign(ACTIONS, {
     const { cat, act, n, label } = t.dataset;
     const what = { rework: `把这 ${n} 条重新派给正在等任务的施工 Agent（从当前 main 开新工作副本，带上一版提交和退回原因；旧施工单关闭，工作副本保留）`,
       drop: cat === 'empty' ? `把这 ${n} 条标记为已完成（提交里没有改动，按 main 已包含处理；可随时改回）` : `这 ${n} 条不再落地（移到已完成、标记无需实施；施工分支保留，可随时改回）`,
-      rereview: `作废这 ${n} 条的旧审查结论，按当前 main 重新派审查` }[act];
+      rereview: `作废这 ${n} 条的旧审查结论，按当前 main 重新派审查`,
+      direct: `把这 ${n} 条按合并稿的最终方案直接派给正在等任务的施工 Agent（不经 Leader；每条开一个工作副本）` }[act];
     if (!(await confirmDialog({ title: `「${label}」· ${t.textContent.trim()}`, body: what, confirmText: '确定', danger: act === 'drop' }))) return;
     t.classList.add('busy');
     try {

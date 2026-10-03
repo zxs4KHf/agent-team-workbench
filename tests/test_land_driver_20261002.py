@@ -128,6 +128,63 @@ class LandDriver(Base):
         self.assertIn("RETURN 原因", task.get("question", ""))
         self.assertEqual(BB.record("D3").get("status"), "closed", "旧施工单关闭")
 
+    def test_auto_release_only_when_content_already_in_main(self):
+        self.built("D3", review="RETURN", fname="same.txt", content="landed\n")       # 内容后来被别的提交带进 main
+        self.built("D4", review="RETURN", fname="new.txt", content="still new\n")     # 真有新内容
+        self.built("D5", review="RETURN", fname="a.txt", content="branch\n")          # 与 main 冲突
+        open(os.path.join(self.repo, "same.txt"), "w").write("landed\n")
+        open(os.path.join(self.repo, "a.txt"), "w").write("main moved\n")
+        self.g("add", "."); self.g("commit", "-m", "other branch landed same content")
+        head = self.g("rev-parse", "HEAD")
+        with mock.patch.object(P, "list_projects", lambda: [{"slug": "p1"}]):
+            done = LD.auto_release()
+            self.assertEqual([d["task_id"] for d in done], ["D3"])
+            self.assertEqual(self.cats(), {"D4": "returned", "D5": "returned"}, "新内容和冲突的留给人判断")
+        rec = next(d for d in P.decisions("p1") if d["task_id"] == "D3")
+        self.assertEqual((rec["execution"], rec["execution_by"]), ("released", "land"))
+        self.assertIn("不产生任何变化", rec["execution_note"])
+        self.assertEqual(self.g("rev-parse", "HEAD"), head, "只改决策记录，不碰 main")
+
+    def test_in_main_handles_bad_input(self):
+        self.assertFalse(LD.in_main(self.repo, "0" * 40), "对象不存在：交给人判断")
+        self.assertFalse(LD.in_main("", "abc"))
+
+    def adopt(self, tid, **kw):
+        items = P.decisions("p1") + [{"task_id": tid, "status": "adopted", "title": f"决策 {tid}", "execution": "pending", "created": B.now_iso(), "updated": B.now_iso(), **kw}]
+        B.write_json(os.path.join(P.PROJECTS, "p1", "decisions.json"), items)
+
+    def test_every_unfinished_adopted_decision_has_a_category(self):
+        # 2026-10-02 接手积压：这几类原来在待落地页里看不见
+        self.adopt("U1")                                                 # 采纳后没开施工单
+        BB.open_worktrees("S1", ["w1"], self.repo); self.adopt("S1")     # 开了单没交提交
+        rec = BB.record("S1"); rec["created"] = ago(30); BB.save_record("S1", rec)
+        BB.open_worktrees("N1", ["w2"], self.repo); self.adopt("N1")     # 刚开单：施工中，不打扰
+        BB.open_worktrees("A1", ["w3"], self.repo); self.adopt("A1")
+        rec = BB.record("A1"); rec["status"] = "closed"; BB.save_record("A1", rec)   # 关了也从没交过
+        self.built("M1", review="PASS", fname="m.txt")
+        rec = BB.record("M1"); rec["teammates"]["w1"]["merged"] = True; BB.save_record("M1", rec)   # 早已合入，决策没回写
+        self.assertEqual(self.cats(), {"U1": "unbuilt", "S1": "stalled", "N1": "building", "A1": "abandoned", "M1": "merged"})
+
+    def test_merged_and_auto_merged_decisions_are_written_back(self):
+        self.built("M1", review="PASS", fname="m.txt")
+        rec = BB.record("M1"); rec["teammates"]["w1"]["merged"] = True; BB.save_record("M1", rec)
+        self.built("D1", review="PASS", review_age_h=1, fname="d.txt")
+        with mock.patch.object(P, "list_projects", lambda: [{"slug": "p1"}]):
+            LD.auto_release()
+            LD.auto_merge()
+        ex = {d["task_id"]: d.get("execution") for d in P.decisions("p1")}
+        self.assertEqual((ex["M1"], ex["D1"]), ("released", "released"), "合入了就回写已落地，不再永远挂着「待实施」")
+
+    def test_unbuilt_direct_needs_listening_builder(self):
+        self.adopt("U1", merge_path="log/U1.merge.md")
+        with mock.patch.object(P, "list_projects", lambda: [{"slug": "p1"}]):
+            r = LD.bulk("unbuilt", "direct")
+            self.assertIn("没有正在等任务", r["failed"][0]["error"])
+            with self.assertRaises(ValueError):
+                LD.bulk("unbuilt", "rework")
+            with self.assertRaises(ValueError):
+                LD.bulk("returned", "direct")
+
     def test_bulk_rejects_unknown(self):
         with self.assertRaises(ValueError):
             LD.bulk("merge_ready", "drop")

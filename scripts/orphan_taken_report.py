@@ -55,7 +55,8 @@ def scan(min_hours: float = 0.0, root: str = "") -> list:
                 taken_at = os.path.getmtime(path)
             except OSError:
                 continue
-            hours = (now - taken_at) / 3600.0
+            # 夹到 0：Windows 上刚写的文件 mtime 可能比随后取的「现在」晚 0~1.5 毫秒，--min-hours 0 会把它漏掉（b66e 实测 21/40 次）
+            hours = max(0.0, (now - taken_at) / 3600.0)
             if hours < min_hours:
                 continue
             task = B.read_json(path, None) or {}
@@ -64,10 +65,9 @@ def scan(min_hours: float = 0.0, root: str = "") -> list:
             deadline = str(task.get("deadline") or "")
             overdue = ""
             if deadline:
-                try:
-                    overdue = "是" if dt.datetime.fromisoformat(deadline) < dt.datetime.now() else "否"
-                except ValueError:
-                    overdue = "?"
+                # 截止时间带偏移（ADR 0010）：和不带时区的 now() 比会 TypeError，统一走 parse_ts
+                due = B.parse_ts(deadline)
+                overdue = "?" if due is None else ("是" if due < B.now_dt() else "否")
             rows.append({
                 "peer": peer, "task_id": task_id,
                 "taken_at": _iso(taken_at), "stale_hours": round(hours, 1),

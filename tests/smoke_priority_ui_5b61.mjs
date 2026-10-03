@@ -74,8 +74,10 @@ ok(/class="chip ok"/.test(board) && board.includes('epoch 12') && board.includes
 st.set({ ...base, lease: { holder: 'f2', epoch: 13, expires: '2026-09-24 00:52:00' } });
 board = V2.leaderBoard();
 ok(board.includes('接管中：f2') && /chip warn/.test(board) && /class="card pad leader-board warn"/.test(board), 'holder 非 controller：转琥珀并显示接管中：X');
-ok(board.includes('收回 Leader') && /disabled[^>]*TODO\(2d14\)/.test(board), '「收回 Leader」按钮留出但禁用，注释指向 2d14');
+ok(/data-action="lead-handback" (?!disabled)/.test(board), '代理持有租约时「收回 Leader」可点（f4f5：/api/handback 已接上）');
 ok(!/leaseCard/.test(board), '不使用 2d14 的 leaseCard 符号');
+st.set({ ...base, lease: { holder: 'controller', epoch: 14, expires: '2026-09-24 00:52:00' } });
+ok(/data-action="lead-handback" disabled/.test(V2.leaderBoard()), '真 Leader 持有租约时「收回 Leader」禁用');
 st.set({ ...base, lease: {} });
 board = V2.leaderBoard();
 ok(board.includes('无有效租约') && board.includes('无人接管'), '无租约：明确显示无人接管');

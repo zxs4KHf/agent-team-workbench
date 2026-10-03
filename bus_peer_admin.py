@@ -25,7 +25,7 @@ def _move_one(tid: str, peer: str, mode: str) -> dict:
         raise ValueError((r["errors"] or r["skipped"] or [{"error": "没有在线 Reviewer"}])[0].get("error")
                          or (r["skipped"] or [{}])[0].get("reason", "审查没派出去"))
     meta = B.read_json(os.path.join(B.OUTBOX, f"{tid}.meta.json"), None) or {}
-    ex = list(meta.get("peers") or []) + [peer]
+    ex = list(meta.get("peers") or []) + [peer, B.review_author(meta)]
     target = RA.pick_free_target(peer, ex) or B.pick_substitute(peer, exclude=ex, any_group=True)
     if not target:
         raise ValueError("没有其他在线 Agent 可以接")

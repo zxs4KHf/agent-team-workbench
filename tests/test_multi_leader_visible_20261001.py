@@ -62,6 +62,14 @@ class LeadersVisible(Base):
         for cid in ("c-live", "c-young"):
             self.assertTrue(os.path.exists(os.path.join(P.COMMANDS, cid + ".taken")))
 
+    def test_released_even_when_no_leader_is_online(self):
+        # 2026-10-02：一个 Leader 都不在线时没人调 wait，原来指令永远卡在「处理中」；现在守护每圈调用同一个函数
+        self.claimed("c-relay", None, 3600, by="sol-6-3")   # 代理 Leader 领的，已离线
+        self.claimed("c-ctl", "gone0001", 3600)             # 主 Leader 会话已消失
+        self.assertEqual(sorted(P.release_orphan_commands(by="guard")), ["c-ctl", "c-relay"])
+        src = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "bus_guard.py"), encoding="utf-8").read()
+        self.assertIn('release_orphan_commands(by="guard")', src, "守护每圈调用")
+
     def test_relay_claim_released_only_when_relay_offline(self):
         B.heartbeat(CTL, "idle", "controller", session="live0001")
         self.claimed("c-relay", None, 3600, by="opus1")

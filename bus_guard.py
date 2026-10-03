@@ -373,9 +373,21 @@ def main():
                 log(f"free stalled {m['task_id']} {m['peer']} ({m['claimed_min']} min, no work) -> {m.get('to', '')}")
             for m in fr["released"]:
                 log(f"free stalled {m['task_id']} {m['peer']} -> released (nobody to take it)")
+            # 领了指令的 Leader 掉线：原来只在「有 Leader 在线调用 wait」时顺手退回，一个 Leader 都不在线时指令永远卡在
+            # 「处理中」（2026-10-02 实测 19 条卡了 7 小时，其中 16 条是用户已回答的决策题）。守护每圈退回一次——
+            # 只退回领取会话已确定消失的，正在处理的一条不碰（bus_projects.orphaned_commands）
+            import bus_projects as P
+            for cid in P.release_orphan_commands(by="guard"):
+                log(f"orphan command {cid} -> back to queue (claimer gone)")
+            # 没有 Leader 在线时，排队超过 10 分钟的「实施」指令直接派给正在等任务的施工 Agent
+            for m in P.auto_implement():
+                log(f"implement direct {m['task_id']}: {m.get('builder') or '-'} {m.get('build_task_id') or ''} {m.get('note') or ''}"[:200])
             # 落地推进器：审查通过（48 小时内）的自动合并；合并受阻的记原因，交给用户在待落地页批量处理
             import bus_land as LD
-            for m in (LD.tick().get("merged") or []):
+            lt = LD.tick()
+            for m in (lt.get("released") or []):
+                log(f"land release {m['task_id']} {m['peer']} {m['commit']}: already in main ({m['cat']})")
+            for m in (lt.get("merged") or []):
                 log(f"land merge {m['build_id']} {m['peer']}: {'ok ' + str(m['result'].get('merge_commit', ''))[:7] if m['result'].get('ok') else 'blocked: ' + str(m['result'].get('reason', ''))[:120]}")
             # ADR 0012：按积压自动分配。默认只预演（写 console/allocator.json），用户在 Agent 页切到「真派」才动手
             import bus_allocate as AL

@@ -92,6 +92,9 @@
   }, true);
   window.addEventListener('resize', function () { if (cur) hide(); settleLater(); });
   // 页面局部重绘：光标没动，但光标下的元素可能被换掉了
-  function watch() { new MutationObserver(function (ms) { for (var i = 0; i < ms.length; i++) if (ms[i].target !== tip) return later(); }).observe(document.body, { childList: true, subtree: true }); }
+  // 说明层自己插进 / 移出 body 不算重绘：否则第一次显示就会再排一次校正，负载高时这次校正晚到、落在滚动收起之后，
+  // 把刚收起的说明又弹回来（ui_audit_selftest「键盘聚焦的说明滚动后丢掉」对照在全量跑时偶发失败的根因）
+  function onlyTip(m) { var n = [].concat([].slice.call(m.addedNodes), [].slice.call(m.removedNodes)); return n.length > 0 && n.every(function (x) { return x === tip || x.id === 'wbTip'; }); }
+  function watch() { new MutationObserver(function (ms) { for (var i = 0; i < ms.length; i++) if (ms[i].target !== tip && !onlyTip(ms[i])) return later(); }).observe(document.body, { childList: true, subtree: true }); }
   if (document.body) watch(); else document.addEventListener('DOMContentLoaded', watch);
 })();

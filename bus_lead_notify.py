@@ -225,6 +225,9 @@ def _prune(evs):
     return [e for e in evs if id(e) in keep]
 
 
+RESOLVED_HIDE_SEC = 1800   # 已恢复的交接通知在概览顶部最多挂 30 分钟
+
+
 def lead_events_open(root):
     """未 ack 的事件，最新在前；带 unstable 标记供 banner 切文案。"""
     evs = [e for e in _load(root) if not e.get("acked")]
@@ -236,6 +239,17 @@ def lead_events_open(root):
     cutoff = dt.datetime.now().astimezone().timestamp() - UNSTABLE_WINDOW_SEC
     recent = recent_changes(root, cutoff)
     unstable = recent > UNSTABLE_COUNT
+    if not unstable:
+        # 已恢复（现在有人持有租约、且 epoch 比事件新）超过 RESOLVED_HIDE_SEC 的通知不再挂在概览顶部：
+        # 2026-10-03 实测顶部挂着 9 小时前早已恢复的交接。不改 acked，交接历史里照样查得到；不稳定时全部照常显示
+        lease = B.lease() or {}
+        now = dt.datetime.now().astimezone().timestamp()
+
+        def stale_resolved(e):
+            at = B.parse_ts(e.get("at"))
+            return (bool(lease.get("holder")) and int(lease.get("epoch") or 0) > int(e.get("epoch") or 0)
+                    and at is not None and now - at.timestamp() > RESOLVED_HIDE_SEC)
+        evs = [e for e in evs if not stale_resolved(e)]
     for e in evs:
         e["unstable"] = unstable
         e["recent_total"] = recent

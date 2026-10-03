@@ -83,6 +83,15 @@ class ReviewNow(Base):
         self.assertFalse(os.path.exists(os.path.join(B.INBOX, "rev1", "R1.json")), "旧副本撤掉")
         self.assertEqual(len(r["dispatched"]), 1)
 
+    def test_replacing_stuck_review_still_dedupes_against_other_live_reviews(self):
+        # c204 派审风暴：换人重派这条路原来整个跳过去重；同一对象已有另一张在审时不能再派
+        self.build("T1", b1={"review": "RETURN"})
+        self.review_task("R1", {"task_id": "T1", "teammate": "b1"}, online=False)            # 卡住的旧单
+        self.review_task("R2", {"task_id": "T1", "teammate": "b1"}, reviewer="rev2")         # 另一张正在审
+        r = RV.review_now("R1")
+        self.assertEqual(self.sent, [], "同一对象已有人在审：不再派第三张")
+        self.assertIn("R2", r["skipped"][0]["reason"])
+
     def test_live_review_task_is_left_alone(self):
         self.build("T1", b1={"review": "RETURN"})
         self.review_task("R1", {"task_id": "T1", "teammate": "b1"})

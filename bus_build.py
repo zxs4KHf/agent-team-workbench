@@ -260,8 +260,16 @@ def set_review(task_id: str, teammate: str, verdict: str, reviewer: str, note: s
 def dispatch_review(task_id: str, teammate: str, ttl_min: int = 20, reviewers: list = None, by: str = "controller") -> dict:
     """把某成员的提交打包派给 Reviewer（作者不审自己；优先别的模型组）。Leader 的 bus_build review 与网页「催审」共用这一条路径。"""
     target = review_target(task_id, teammate)
+    if isinstance(target, dict) and target.get("base") and target.get("base") == target.get("commit"):
+        # 被审提交就是它和 main 的分叉点 = 内容已经在 main 里，包里没有任何差异（9397 / c204 三张空包重复单）
+        raise ValueError(f"{teammate} 的提交 {str(target['commit'])[:8]} 已经在 main 里，没有差异可审")
     pack = review_pack(task_id, teammate, target=target)
     builder_group = B.peer_group(teammate)
+    if reviewers and teammate in reviewers:
+        # 显式点名也要过作者过滤（Leader 的 bus_build review 可以直接给名单）
+        reviewers = [r for r in reviewers if r != teammate]
+        if not reviewers:
+            raise ValueError(f"点名的 Reviewer 只有作者 {teammate} 本人；作者不能审自己的提交，换一位或留空让系统挑")
     reviewers = reviewers or B.pick_reviewers(exclude=[teammate], avoid_group=builder_group)
     if not reviewers:
         # 先问配置自检：配置缺失/没配 reviewer_groups 时报配置问题，真·无人在线时才报原文案

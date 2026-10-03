@@ -152,12 +152,15 @@ class TestWriteFailure(Base):
             raise PermissionError("locked by antivirus")
         LN.time.sleep = lambda s: None
         os.replace = boom
+        import bus_locks as K
+        real_posix, K._replace_posix = K._replace_posix, (lambda src, dst: False)   # 两条替换路径都注入故障（2026-10-03 起先走 POSIX 改名）
         try:
             with self.assertRaises(OSError):
                 LN._write(os.path.join(self.tmp, "console", "x.json"), {"a": 1})
             B.note_lead_event(CTL, "p1", 1, "takeover", "SECRET-PROMPT-TEXT Bearer abcdefghijklmnop")
         finally:
             os.replace = real
+            K._replace_posix = real_posix
         with open(os.path.join(self.tmp, "console", "lead_notify.err.log"), encoding="utf-8") as f:
             log = f.read()
         self.assertIn("reason=takeover", log); self.assertIn("文件被占用", log)

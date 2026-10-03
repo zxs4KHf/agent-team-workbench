@@ -15,17 +15,51 @@
 重新派施工不经 Leader：直接 bus_core.dispatch(mode="build") 给一个「正在等任务、属于能施工分组」的 Agent，
 新施工单从当前 main 开工作副本，任务包里写明上一版的分支、提交和退回意见；旧施工单关闭（工作副本保留），
 决策改关联新施工单（implementation_task_id）。
+
+已在 main 自动结案（2026-10-02 接手积压时实测：139 条需要判断的里 47 条的提交合进 main 根本不产生变化——内容早已经
+别的分支落地，只是这张施工单没被标记）：守护每圈对需要判断的几类做一次合并模拟（git merge-tree），结果树等于 main
+的就把决策标成已落地（execution=released），写明依据。不碰 main、不碰施工记录；判断按（提交, main 头）缓存。
 """
 import os
+import subprocess
 import time
 
 import bus_core as B
 
-CATS = ("merge_ready", "stale", "returned", "blocked", "empty", "closed", "reviewing")
+CATS = ("merge_ready", "stale", "returned", "blocked", "empty", "closed", "reviewing", "merged", "stalled", "abandoned", "unbuilt", "building")
 STALE_REVIEW_HOURS = 48   # 审查超过这么久才合：main 早变了，先重审，不自动合
 CAT_LABEL = {"merge_ready": "审查通过·自动合并中", "stale": "审查过期·需重审", "returned": "审查退回·待返修", "blocked": "合并受阻·待返修",
-             "empty": "空交付（提交里没有改动）", "closed": "施工单已关·没合并", "reviewing": "等审查"}
+             "empty": "空交付（提交里没有改动）", "closed": "施工单已关·没合并", "reviewing": "等审查",
+             # 2026-10-02 接手积压：下面几类原来在待落地页里看不见——22 条早已合入 main 的决策一直挂着「待实施」，
+             # 22 张施工单开着几天没人交提交、8 张关了也从没交过、7 条采纳后根本没开施工单
+             "merged": "已合入·自动结案中", "stalled": "施工停滞·超过一天没交提交", "abandoned": "施工单已关·从未交提交",
+             "unbuilt": "还没开施工单", "building": "施工中"}
+STALL_HOURS = 24
 AUTO_MERGE_PER_CYCLE = 3
+AUTO_RELEASE_PER_CYCLE = 30
+JUDGE_CATS = ("stale", "returned", "blocked", "empty", "closed")   # 需要人判断的几类：先排除「其实已经在 main 了」的
+_IN_MAIN = {}   # (repo, commit, main_head) -> bool
+
+
+def _git(repo: str, *args) -> subprocess.CompletedProcess:
+    return subprocess.run(["git", *args], cwd=repo, capture_output=True, text=True, encoding="utf-8", errors="replace",
+                          timeout=60, creationflags=0x08000000 if os.name == "nt" else 0)
+
+
+def in_main(repo: str, commit: str) -> bool:
+    """把 commit 合进 main 会不会产生任何变化：merge-tree 无冲突且结果树就是 main 的树 → 内容已经在 main。
+    git 太旧（没有 merge-tree --write-tree）、对象不存在、历史不相关一律返回 False（交给人判断，不冒进）。"""
+    if not repo or not commit:
+        return False
+    head = _git(repo, "rev-parse", "main").stdout.strip()
+    if not head:
+        return False
+    key = (repo, commit, head)
+    if key not in _IN_MAIN:
+        r = _git(repo, "merge-tree", "--write-tree", "--no-messages", head, commit)
+        tree = (r.stdout.splitlines() or [""])[0].strip()
+        _IN_MAIN[key] = r.returncode == 0 and bool(tree) and tree == _git(repo, "rev-parse", head + "^{tree}").stdout.strip()
+    return _IN_MAIN[key]
 
 
 def _build_rec(bid: str) -> dict:
@@ -65,18 +99,37 @@ def scan(projects=None) -> list:
                 continue
             bid = d.get("implementation_task_id") or d["task_id"]
             rec = _build_rec(bid)
-            if not rec:
+            tms = rec.get("teammates") or {}
+            created = B.parse_ts(rec.get("created") or d.get("updated") or d.get("created"))
+            base = {"project": slug, "task_id": d["task_id"], "title": d.get("title") or d["task_id"], "build_id": bid if tms else "",
+                    "age_days": round((time.time() - created.timestamp()) / 86400, 1) if created else None}
+            if not tms:
+                out.append({**base, "peer": "", "commit": "", "branch": "", "cat": "unbuilt", "note": ""})
                 continue
-            for peer, tm in (rec.get("teammates") or {}).items():
+            done = next(((p, tm) for p, tm in tms.items() if tm.get("merged")), None)
+            if done:
+                out.append({**base, "peer": done[0], "commit": str(done[1].get("commit") or "")[:7], "branch": done[1].get("branch", ""), "cat": "merged", "note": ""})
+                continue
+            hit = False
+            for peer, tm in tms.items():
                 cat = classify(rec, peer)
                 if not cat:
                     continue
-                created = B.parse_ts(rec.get("created"))
-                out.append({"project": slug, "task_id": d["task_id"], "title": d.get("title") or d["task_id"], "build_id": bid,
-                            "peer": peer, "commit": str(tm.get("commit") or "")[:7], "branch": tm.get("branch", ""), "cat": cat,
-                            "note": str(tm.get("land_block") or tm.get("review_note") or "")[:600],
-                            "age_days": round((time.time() - created.timestamp()) / 86400, 1) if created else None})
+                out.append({**base, "peer": peer, "commit": str(tm.get("commit") or "")[:7], "branch": tm.get("branch", ""), "cat": cat,
+                            "note": str(tm.get("land_block") or tm.get("review_note") or "")[:600]})
+                hit = True
                 break   # 一条决策只算一个成员（与 implementation_of 取第一个提交者一致）
+            if hit:
+                continue
+            # 没有任何成员交过提交
+            peer = next(iter(tms), "")
+            if rec.get("closed") or rec.get("status") not in (None, "building"):
+                cat = "abandoned"
+            elif base["age_days"] is not None and base["age_days"] * 24 > STALL_HOURS:
+                cat = "stalled"
+            else:
+                cat = "building"
+            out.append({**base, "peer": peer, "commit": "", "branch": (tms.get(peer) or {}).get("branch", ""), "cat": cat, "note": ""})
     return out
 
 
@@ -106,6 +159,10 @@ def auto_merge(limit: int = AUTO_MERGE_PER_CYCLE, by: str = "land") -> list:
                     reason += "：" + "、".join(map(str, r["conflicts"]))[:300]
                 tm["land_block"] = reason
                 BB.save_record(it["build_id"], rec)
+        else:
+            import bus_projects as P
+            P.upsert_decision(it["project"], it["task_id"], execution="released", execution_by=by, execution_at=B.now_iso(),
+                              execution_note=f"落地推进器自动合并 {it['peer']} 的提交 {it['commit']}（审查通过、集成门禁通过）")
         done.append({**it, "result": {k: v for k, v in r.items() if k in ("ok", "reason", "merge_commit", "conflicts")}})
     return done
 
@@ -138,6 +195,19 @@ def rework(it: dict, by: str = "user") -> dict:
     return {"to": target, "build_id": r["task_id"]}
 
 
+def direct(it: dict, by: str = "user") -> dict:
+    """还没开施工单的：按合并稿最终方案直接派给正在等任务的施工 Agent（bus_projects.dispatch_implement）。
+    没人在等或合并稿读不出方案时不入 Leader 队列，直接报错，留在这一类里等下次。"""
+    import bus_projects as P
+    import bus_reassign as RA
+    if not RA.pick_free_target("", [], role="builder"):
+        raise ValueError("现在没有正在等任务的施工 Agent")
+    r = P.dispatch_implement(it["project"], it["task_id"], by=by)
+    if not r.get("direct"):
+        raise ValueError(r.get("note") or "没有派出去")
+    return {"to": r["builder"], "build_id": r["build_task_id"]}
+
+
 def rereview(it: dict, by: str = "user") -> dict:
     """审查过期的：作废旧结论，按当前 main 重新派审查（bus_build.dispatch_review，派给在线 Reviewer）。"""
     import bus_build as BB
@@ -161,25 +231,50 @@ def drop(it: dict, by: str = "user") -> dict:
 
 def bulk(cat: str, action: str, by: str = "user", limit: int = 50) -> dict:
     """用户在待落地页对一类批量处理：rework（重新派施工）/ drop（不再落地）。逐条结果都返回，派不出去的写清原因。"""
-    if cat not in ("stale", "returned", "blocked", "empty", "closed"):
-        raise ValueError("只能批量处理：审查过期 / 审查退回 / 合并受阻 / 空交付 / 施工单已关")
-    if action not in ("rework", "drop", "rereview") or (action == "rereview" and cat != "stale"):
-        raise ValueError("action 只能是 rework / drop；审查过期的还可以 rereview")
+    if cat not in ("stale", "returned", "blocked", "empty", "closed", "stalled", "abandoned", "unbuilt"):
+        raise ValueError("只能批量处理：审查过期 / 审查退回 / 合并受阻 / 空交付 / 施工单已关 / 施工停滞 / 从未交提交 / 还没开施工单")
+    allowed = {"stale": ("rework", "drop", "rereview"), "unbuilt": ("direct", "drop")}.get(cat, ("rework", "drop"))
+    if action not in allowed:
+        raise ValueError(f"这一类只能：{' / '.join(allowed)}")
     done, failed = [], []
     for it in [x for x in scan() if x["cat"] == cat][:limit]:
         try:
-            fn = {"rework": rework, "drop": drop, "rereview": rereview}[action]
+            fn = {"rework": rework, "drop": drop, "rereview": rereview, "direct": direct}[action]
             done.append({**it, **fn(it, by)})
         except Exception as exc:  # noqa: BLE001
             failed.append({"task_id": it["task_id"], "title": it["title"], "error": str(exc)[:200]})
-            if action == "rework" and "没有正在等任务" in str(exc):
+            if action in ("rework", "direct") and "没有正在等任务" in str(exc):
                 break   # 没人可派：后面的都会一样，不再逐条撞
     return {"done": done, "failed": failed, "remaining": len([x for x in scan() if x["cat"] == cat])}
 
 
+def auto_release(limit: int = AUTO_RELEASE_PER_CYCLE, by: str = "land") -> list:
+    """需要判断的几类里，提交内容其实已经在 main 的：标成已落地，写明依据，不再占用户的注意力。"""
+    import bus_projects as P
+    done = []
+    for it in [x for x in scan() if x["cat"] in JUDGE_CATS + ("merged",)]:
+        if len(done) >= limit:
+            break
+        if it["cat"] == "merged":
+            P.upsert_decision(it["project"], it["task_id"], execution="released", execution_by=by, execution_at=B.now_iso(),
+                              execution_note=f"施工已合入 main（{it['peer']} 的提交 {it['commit']}），只是决策没回写")
+            done.append(it)
+            continue
+        rec = _build_rec(it["build_id"])
+        tm = (rec.get("teammates") or {}).get(it["peer"]) or {}
+        if not in_main(rec.get("repo") or B.WORKSPACE, tm.get("commit") or ""):
+            continue
+        P.upsert_decision(it["project"], it["task_id"], execution="released", execution_by=by, execution_at=B.now_iso(),
+                          execution_note=f"{it['peer']} 的提交 {it['commit']} 合进当前 main 不产生任何变化：内容已由别的分支落地（原归类：{CAT_LABEL[it['cat']]}）")
+        done.append(it)
+    return done
+
+
 def tick() -> dict:
-    """守护每圈调用：只做不需要人判断的事——自动合并审查通过的。开关：roles.json policy.land_auto_merge（缺省开）。"""
+    """守护每圈调用：只做不需要人判断的事——已在 main 的结案、审查通过的自动合并。
+    开关：roles.json policy.land_auto_release / land_auto_merge（缺省都开）。"""
     import bus_build as BB
+    released = auto_release() if BB.policy("land_auto_release", True) is not False else []
     if BB.policy("land_auto_merge", True) is False:
-        return {"merged": [], "off": True}
-    return {"merged": auto_merge()}
+        return {"merged": [], "released": released, "off": True}
+    return {"merged": auto_merge(), "released": released}

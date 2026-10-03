@@ -185,7 +185,7 @@ export function implActions(d, small = true) {
   const im = d.implementation || {}, cls = small ? 'small' : '';
   const canPush = !['building', 'review', 'merged'].includes(im.state);
   const pushLabel = im.state === 'queued' ? `已在队列 · 第 ${im.queue_pos} 位` : im.state === 'claimed' ? 'Leader 处理中' : im.state === 'dispatched' ? '已建单' : '派落地给 builder';
-  return `<button type="button" class="${cls} ${canPush && !['queued', 'claimed', 'dispatched'].includes(im.state) ? 'primary' : 'ghost'}" data-action="implement-nudge" data-id="${attr(d.task_id)}" ${canPush ? '' : 'disabled'} data-tip="把这条 implement 直接推给 Leader；同一任务不会重复建单">${esc(pushLabel)}</button><button type="button" class="${cls} ghost" data-action="export-task-pack" data-id="${attr(d.task_id)}" data-tip="把最终方案、涉及文件、验收条导成 Markdown，给真人或外部会话施工">导出任务包</button>`;
+  return `<button type="button" class="${cls} ${canPush && !['queued', 'claimed', 'dispatched'].includes(im.state) ? 'primary' : 'ghost'}" data-action="implement-nudge" data-id="${attr(d.task_id)}" ${canPush ? '' : 'disabled'} data-tip="把这条 implement 直接推给 Leader；同一任务不会重复建单">${esc(pushLabel)}</button><button type="button" class="${cls} ghost" data-action="implement-direct" data-id="${attr(d.task_id)}" ${canPush && !['claimed', 'dispatched'].includes(im.state) ? '' : 'disabled'} data-tip="不等 Leader：按合并稿的最终方案开工作副本，直接派给一个正在等任务的施工 Agent；没人在等就留在 Leader 队列">直接派施工</button><button type="button" class="${cls} ghost" data-action="export-task-pack" data-id="${attr(d.task_id)}" data-tip="把最终方案、涉及文件、验收条导成 Markdown，给真人或外部会话施工">导出任务包</button>`;
 }
 // 落地推进器（bus_land）：不需要判断的自动推（审查通过的守护自动合并），需要判断的按类给批量按钮
 const LAND_ACTS = {
@@ -194,6 +194,9 @@ const LAND_ACTS = {
   blocked: [['rework', '重新派施工'], ['drop', '不再落地']],
   empty: [['drop', 'main 已有，标记完成'], ['rework', '重新派施工']],
   closed: [['rework', '重新派施工'], ['drop', '不再落地']],
+  stalled: [['rework', '换人重新施工'], ['drop', '不再落地']],
+  abandoned: [['rework', '重新派施工'], ['drop', '不再落地']],
+  unbuilt: [['direct', '直接派施工'], ['drop', '不再落地']],
 };
 function landActions() {
   const L = S().landing || {};

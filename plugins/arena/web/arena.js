@@ -77,7 +77,10 @@ const REASON = {
 const JOIN_STATE = { queued: ['排队中', 'info'], sending: ['发送中', 'info'], waiting_peer: ['等待 Agent 心跳', 'info'], connected: ['已接入', 'ok'], unconfirmed: ['未确认', 'warn'], failed: ['失败', 'bad'], cancelled: ['已取消', 'plain'] };
 const ACTIVE_STATES = ['running', 'queued', 'sending', 'waiting_peer'];
 const isActiveJob = j => ACTIVE_STATES.includes(j.status);
-const isCancellable = j => j.kind === 'join' && ['queued', 'sending', 'waiting_peer'].includes(j.status);
+// 只有排队中的能真取消：发送中 / 等心跳时消息已经发进会话，撤不回（4582 前端那一小块，后端取消语义不变）
+const isCancellable = j => j.kind === 'join' && j.status === 'queued';
+const isPastCancel = j => j.kind === 'join' && ['sending', 'waiting_peer'].includes(j.status);
+const PAST_CANCEL_NOTE = '消息已经发进会话，撤不回；等它接入或超时即可';
 const RECENT_MS = 30 * 60 * 1000;
 const isRecent = j => { const t = Date.parse(String(j.finished_at || j.updated_at || j.started_at || '').replace(' ', 'T')); return !t || Date.now() - t < RECENT_MS; };
 const newRequestId = () => (crypto.randomUUID ? crypto.randomUUID() : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`);
@@ -95,7 +98,7 @@ function jobsBanner() {
   const shown = [...running, ...jobs.filter(j => !isActiveJob(j) && (j.status === 'failed' || j.kind === 'join') && isRecent(j)).slice(0, 3)];
   if (!shown.length) return '';
   const fs = 'font-size:calc(11px * var(--fs-scale, 1))';
-  return `<div class="banner ${running.length ? 'info' : 'warn'} stack" style="gap:6px">${shown.map(j => { const st = j.kind === 'join' && JOIN_STATE[j.status]; return `<div class="row between"><span>${icon(j.status === 'failed' ? 'warn' : j.status === 'connected' ? 'check' : 'clock')} ${st ? `<span class="chip ${st[1]}" style="${fs}">${esc(st[0])}</span> ` : ''}${esc(j.message || j.kind)}${j.payload && j.payload.group ? ` <span class="mono faint" style="${fs}">${esc(j.payload.group)}</span>` : ''}</span><span class="row" style="gap:6px;flex:none"><span class="mono faint">${j.progress}/${j.total || '?'}</span>${isCancellable(j) ? `<button type="button" class="small ghost" data-action="arena-join-cancel" data-id="${attr(j.id)}" ${j.cancel_requested ? 'disabled' : ''}>取消</button>` : ''}</span></div>${isActiveJob(j) ? `<div class="bar"><i style="width:${j.total ? Math.round(j.progress / j.total * 100) : 10}%"></i></div>` : ''}${j.cancel_note ? `<div class="faint" style="${fs}">${esc(j.cancel_note)}</div>` : ''}${jobReason(j)}`; }).join('')}</div>`;
+  return `<div class="banner ${running.length ? 'info' : 'warn'} stack" style="gap:6px">${shown.map(j => { const st = j.kind === 'join' && JOIN_STATE[j.status]; return `<div class="row between"><span>${icon(j.status === 'failed' ? 'warn' : j.status === 'connected' ? 'check' : 'clock')} ${st ? `<span class="chip ${st[1]}" style="${fs}">${esc(st[0])}</span> ` : ''}${esc(j.message || j.kind)}${j.payload && j.payload.group ? ` <span class="mono faint" style="${fs}">${esc(j.payload.group)}</span>` : ''}</span><span class="row" style="gap:6px;flex:none"><span class="mono faint">${j.progress}/${j.total || '?'}</span>${isCancellable(j) ? `<button type="button" class="small ghost" data-action="arena-join-cancel" data-id="${attr(j.id)}" ${j.cancel_requested ? 'disabled' : ''}>取消</button>` : isPastCancel(j) ? `<button type="button" class="small ghost" disabled title="${attr(PAST_CANCEL_NOTE)}">取消</button>` : ''}</span></div>${isActiveJob(j) ? `<div class="bar"><i style="width:${j.total ? Math.round(j.progress / j.total * 100) : 10}%"></i></div>` : ''}${j.cancel_note ? `<div class="faint" style="${fs}">${esc(j.cancel_note)}</div>` : ''}${jobReason(j)}`; }).join('')}</div>`;
 }
 function downState() {
   return `<div class="view">${head('Arena', '控制面没有响应', '账号池、会话池与中继由 Arena 插件自己的服务提供。')}<div class="empty" style="padding:60px"><strong>arena 控制面（9091）没有响应</strong><span>${esc(A.error)}</span><div class="row" style="justify-content:center;margin-top:12px"><button type="button" class="primary" data-action="arena-reload">${icon('refresh')}重试</button><a class="link" href="/hub">${icon('box')}到「扩展与来源 → 插件」看状态和日志</a></div></div></div>`;

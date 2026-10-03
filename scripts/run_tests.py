@@ -71,13 +71,24 @@ def known_flaky(path: str = "") -> set:
     return out
 
 
+_KEY_LINE = re.compile(r"^\s*(FAIL\b|ERROR\b|FAILED\b|Traceback|\w*Error\b|✗)")
+
+
+def digest(text: str, tail: int = 1500) -> str:
+    """失败摘要：先列出所有 FAIL / 报错行（最多 15 行），再接输出结尾。只留结尾时，真正挂掉的那行常被截掉——
+    2026-10-02 ui_audit_selftest 的失败摘要里只看得到一行通过的断言，排查多绕了一圈。"""
+    keys = [l[:300] for l in text.splitlines() if _KEY_LINE.match(l)][:15]
+    end = text[-tail:]
+    return ("【失败行】\n" + "\n".join(keys) + "\n【输出结尾】\n" + end) if keys and not all(k in end for k in keys) else end
+
+
 def log_flaky(f: str, first: tuple, second: tuple) -> None:
     try:
         d = os.path.join(ROOT, "log")
         os.makedirs(d, exist_ok=True)
         with open(os.path.join(d, "flaky_runs.jsonl"), "a", encoding="utf-8") as fh:
             fh.write(json.dumps({"ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "file": f,
-                                 "first": {"rc": str(first[1]), "sec": round(first[2], 1), "tail": first[3][-1500:]},
+                                 "first": {"rc": str(first[1]), "sec": round(first[2], 1), "tail": digest(first[3])},
                                  "retry": {"rc": str(second[1]), "sec": round(second[2], 1)}}, ensure_ascii=False) + "\n")
     except OSError:
         pass
@@ -90,7 +101,7 @@ def run_browser(f: str, timeout: int, flaky: set, retry: bool = True) -> tuple:
         return (*first, "")
     second = run(f, timeout)
     log_flaky(f, first, second)
-    out = f"----- 首次失败（{first[1]}，{first[2]:.0f}s）-----\n{first[3][-1500:]}\n----- 复跑（{second[1]}，{second[2]:.0f}s）-----\n{second[3][-800:]}"
+    out = f"----- 首次失败（{first[1]}，{first[2]:.0f}s）-----\n{digest(first[3])}\n----- 复跑（{second[1]}，{second[2]:.0f}s）-----\n{digest(second[3], 800)}"
     if second[1] != 0:
         return f, first[1], first[2] + second[2], out, "稳定失败"
     if f in flaky:
@@ -157,7 +168,7 @@ def main():
     for f, out in warned:
         print(f"\n----- ⚠ {f}：已登记偶发（docs/FLAKY.md），复跑通过 -----\n{out[-1200:]}")
     for f, rc, _, out in bad:
-        print(f"\n===== {f}（{rc}）=====\n{out[-1500:]}")
+        print(f"\n===== {f}（{rc}）=====\n{out if out.startswith('----- 首次失败') else digest(out)}")
     if a.audit:  # 界面体检：tokens 守卫之上的第二道护栏，看渲染后的真实页面
         print("\n===== 界面体检 scripts/ui_audit.py =====", flush=True)
         au = subprocess.run([sys.executable, "-X", "utf8", os.path.join(ROOT, "scripts", "ui_audit.py"), "--web", os.path.join(ROOT, "web")], cwd=ROOT)

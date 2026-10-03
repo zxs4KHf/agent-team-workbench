@@ -197,12 +197,46 @@ def ensure_dirs():
         os.makedirs(d, exist_ok=True)
 
 
-def read_json(path: str, default=None):
+def _open_shared(path: str):
+    """读文件时允许别人同时替换它。Windows 上 Python 的 open 不带 FILE_SHARE_DELETE：只要有人在读，另一个进程的
+    os.replace（atomic_write_json）就会被拒（2026-10-03 实测：工作台每秒读决策表，接手脚本写同一张表 1 秒内 6 次重试全失败）。
+    带上 FILE_SHARE_DELETE 后替换照常成功，读的一方拿到的是打开那一刻的完整旧内容。其它系统没有这个问题，直接 open。"""
+    if os.name != "nt":
+        return open(path, encoding="utf-8")
+    import ctypes
+    import msvcrt
+    from ctypes import wintypes
+    k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    k32.CreateFileW.restype = wintypes.HANDLE
+    k32.CreateFileW.argtypes = (wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, wintypes.LPVOID, wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE)
+    GENERIC_READ, SHARE_ALL, OPEN_EXISTING, NORMAL = 0x80000000, 0x1 | 0x2 | 0x4, 3, 0x80
+    h = k32.CreateFileW(os.fspath(path), GENERIC_READ, SHARE_ALL, None, OPEN_EXISTING, NORMAL, None)
+    if h in (None, wintypes.HANDLE(-1).value):
+        err = ctypes.get_last_error()
+        if err in (2, 3):
+            raise FileNotFoundError(2, "No such file", path)
+        raise PermissionError(13, ctypes.FormatError(err).strip(), path) if err in (5, 32, 33) else OSError(err, ctypes.FormatError(err).strip(), path)
     try:
-        with open(path, encoding="utf-8") as f:
-            return json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
-        return default
+        fd = msvcrt.open_osfhandle(h, os.O_RDONLY)
+    except Exception:
+        k32.CloseHandle(h)
+        raise
+    return open(fd, encoding="utf-8", closefd=True)
+
+
+def read_json(path: str, default=None):
+    # Windows 上读文件恰好撞上另一进程的原子替换（心跳、决策表每秒都在写）会 PermissionError，接口因此 500（41db8cf / 6c31）。
+    # 短暂重试；仍不行就抛出——绝不能当成「文件不存在」返回默认值：先读后写的路径（upsert_decision 等）会拿空表覆盖整个文件
+    for attempt in range(6):
+        try:
+            with _open_shared(path) as f:
+                return json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            return default
+        except PermissionError:
+            if attempt == 5:
+                raise
+            time.sleep(0.02 * (attempt + 1))
 
 
 def write_json(path: str, data):
@@ -680,7 +714,10 @@ def dispatch(from_peer: str, peers: list, mode: str, question: str, context_file
     if angles is True:
         angles = {p: ANGLES[i % len(ANGLES)] for i, p in enumerate(peers)}
     angles = angles or {}
-    swaps = substitute_offline(list(peers))
+    author = (review_of or {}).get("teammate") if isinstance(review_of, dict) else None
+    if author and author in peers:
+        raise ValueError(f"{author} 是被审提交的作者，不能审自己的代码；换一位 Reviewer")
+    swaps = substitute_offline(list(peers), exclude={author} if author else None)
     if swaps:
         peers = [swaps.get(p, p) for p in peers]
         angles = {swaps.get(k, k): v for k, v in angles.items()}
@@ -1366,6 +1403,8 @@ def _mutate_group_hint(peer: str, fn) -> dict:
     ensure_dirs()
     valid_name(peer)
     path = os.path.join(PEERS, f"{peer}.json")
+    if not os.path.isfile(path):   # 锁外只做存在性预检（不 open，免得撞上心跳的原子替换）；没接入过的不进锁，不在 peers/ 下留 .mutex
+        raise ValueError(f"peer {peer} 尚未接入（没有 peers/{peer}.json），不能只靠归类建档")
     with _hint_mutex(peer):
         data = read_json(path, None)
         if not isinstance(data, dict):
@@ -1723,9 +1762,12 @@ def pick_reviewers(exclude: list = None, n: int = 1, avoid_group: str = "") -> l
     return [p["peer"] for p in cands[:n]]
 
 
-def substitute_offline(peers: list) -> dict:
+def substitute_offline(peers: list, exclude=None) -> dict:
     # 派发时离线的 peer 换成同组在线 peer；返回 {原名: 替补名}
-    online = {p["peer"] for p in list_peers() if p.get("online") and p["peer"] != "controller"}
+    # exclude：不能顶上来的人。审查单传被审提交的作者——作者和点名的 Reviewer 常在同一组，
+    # 不排除就会「Reviewer 离线 → 作者顶上 → 自己审自己」（d5de 事故：读完包才被 set_review 拒收，白跑一轮）
+    ex = set(exclude or ())
+    online = {p["peer"] for p in list_peers() if p.get("online") and p["peer"] != "controller" and p["peer"] not in ex}
     peers = list(dict.fromkeys(peers))  # 去重：同名出现两次会让替补撞名、判定多算
     used = set(p for p in peers if p in online)
     swaps = {}
@@ -2010,6 +2052,12 @@ def _ensure_build_seat(task_id: str, meta: dict, target: str) -> dict:
     return BB.add_teammate(task_id, target) or {}
 
 
+def review_author(meta: dict) -> str:
+    """审查单被审提交的作者（没有返回空串）。改派 / 顶替 / 重派挑人时都要把他排除。"""
+    r = (meta or {}).get("review_of")
+    return str(r.get("teammate") or "") if isinstance(r, dict) else ""
+
+
 def reassign(task_id: str, peer: str, to_peer: str = "", extend_min: int = 60, by: str = "user") -> dict:
     # 把某个 Agent 名下的任务改派：指定 to_peer，或自动挑同组在线 Agent；该 Agent 自己在线且没人可换时退回给它自己并续期
     meta = read_json(os.path.join(OUTBOX, f"{task_id}.meta.json"), None)
@@ -2019,12 +2067,16 @@ def reassign(task_id: str, peer: str, to_peer: str = "", extend_min: int = 60, b
         raise ValueError(f"{peer} 不在任务 {task_id} 的名单里")
     if os.path.exists(os.path.join(OUTBOX, f"{task_id}.{peer}.md")):
         raise ValueError(f"{peer} 已经回答过 {task_id}")
-    target = to_peer or pick_substitute(peer, exclude=list(meta["peers"]))
+    author = review_author(meta)
+    if to_peer and to_peer == author:
+        raise ValueError(f"{author} 是被审提交的作者，不能把审查改派给他本人")
+    ex = list(meta["peers"]) + ([author] if author else [])
+    target = to_peer or pick_substitute(peer, exclude=ex)
     if not target and peer_state(peer)["online"]:
         target = peer
     if not target and by == "user":
         # 用户手动改派：同组没人时跨组顶替，只要有在线 Agent 就不让任务卡死
-        target = pick_substitute(peer, exclude=list(meta["peers"]), any_group=True)
+        target = pick_substitute(peer, exclude=ex, any_group=True)
     if not target:
         raise ValueError(f"{peer} 离线，且当前没有任何在线 Agent 可以顶替；请取消任务或等 Agent 上线")
     valid_name(target)
@@ -2127,7 +2179,9 @@ def redispatch(task_id: str, from_peer: str = "controller", peers: list = None, 
     meta = read_json(os.path.join(OUTBOX, f"{task_id}.meta.json"), None)
     if not meta:
         meta, _ = find_meta(task_id)
-    src_peers = list(dict.fromkeys(peers or (meta or {}).get("peers") or []))
+    # 审查单重派后变成普通任务、不再带 review_of，作者在这一步就得排除，否则可能被派去「审」自己的提交
+    author = ((meta or {}).get("review_of") or {}).get("teammate") or ""
+    src_peers = [p for p in dict.fromkeys(peers or (meta or {}).get("peers") or []) if p != author]
     q = question or (meta or {}).get("question", "")
     if not q or not src_peers:
         raise ValueError(f"任务 {task_id} 没有可用的原始任务包，请从「发起」页重新派发")
@@ -2138,7 +2192,7 @@ def redispatch(task_id: str, from_peer: str = "controller", peers: list = None, 
             raise ValueError("所有名额都已作答，无需重派；可直接「现在合并」")
     # 原名单里离线的 Agent 先换成同组在线 Agent；一个都不在线就报错，不生成空任务
     online = {p["peer"] for p in list_peers() if p.get("online") and p["peer"] != "controller"}
-    swaps = substitute_offline(list(src_peers))
+    swaps = substitute_offline(list(src_peers), exclude={author} if author else None)
     new_peers = []
     for p in src_peers:
         t = swaps.get(p, p)
@@ -2146,7 +2200,7 @@ def redispatch(task_id: str, from_peer: str = "controller", peers: list = None, 
             new_peers.append(t)
     if not new_peers:
         # 原名单全离线且同组无人：退到当前全部在线 Agent（最多 5 个，空闲优先）
-        allp = [p for p in list_peers() if p.get("online") and p["peer"] != "controller"]
+        allp = [p for p in list_peers() if p.get("online") and p["peer"] not in ("controller", author)]
         allp.sort(key=lambda p: (activity_of(p) != "idle", p["peer"]))
         new_peers = [p["peer"] for p in allp[:5]]
     if not new_peers:

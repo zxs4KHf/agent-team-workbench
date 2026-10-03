@@ -115,6 +115,7 @@ def prompt_text(kind: str, peer: str = "<PEER>", model: str = "<MODEL>", token: 
 备选接入路径（仅限当前会话确系运行在宿主目标 Windows 工作区本地，且具备终端执行权限时使用；禁止远程 Linux 环境尝试执行 D: 盘路径命令）：下面仅为模板。仅当 peer/model 为已确认的安全标识（字母、数字、下划线、连字符，模型可另含点、冒号、斜杠）时使用；包含引号、空白、换行或 shell 控制字符时禁止复制拼接，改用上面的 MCP 参数调用。
 等待 `{cli} wait --peer {peer} --model {model}`；回复时先把回答写入 {WS_WIN}\\tmp\\answer-{peer}.md，再执行 `{cli} reply --peer {peer} --task <task_id> --file {WS_WIN}\\tmp\\answer-{peer}.md`。"""
 STATUSES = ("draft", "dispatched", "collecting", "ready_for_merge", "merged", "adopted", "rejected", "archived", "cancelled", "superseded")
+USER_FINAL = ("adopted", "rejected", "archived", "cancelled", "superseded")   # 用户已定的：代理 Leader 不得改状态
 
 # intro 是卡面给用户的一句话；summary 留给详情。40–70 字是目标范围，80 字是硬上限。
 INTRO_MIN_CHARS, INTRO_TARGET_MAX_CHARS, INTRO_HARD_MAX_CHARS = 40, 70, 80
@@ -1085,6 +1086,17 @@ def live_leader_sessions() -> dict:
     return out
 
 
+def request_handback(by: str = "user") -> dict:
+    """用户点「收回 Leader」：代理 Leader 持有租约时，写交回请求；代理下一次等待指令时交回（console_wait 的 handback 分支，
+    5 分钟内有效）。没有代理持有时报错，不写文件。"""
+    l = B.lease() or {}
+    holder = l.get("holder") or ""
+    if not holder or holder == CONTROLLER:
+        raise ValueError("现在没有代理 Leader 持有租约，不需要收回")
+    B.write_json(os.path.join(B.ROOT, "console", "handback.json"), {"to": CONTROLLER, "at": B.now_iso(), "by": by})
+    return {"ok": True, "holder": holder, "epoch": l.get("epoch")}
+
+
 def orphaned_commands(live: dict = None) -> list:
     """已领未回、且领取它的会话已确定不在了的指令。
 
@@ -1688,6 +1700,17 @@ def _post_impl(slug: str, task_id: str = "", status: str = "", title: str = "", 
         if status in ("merged", "adopted", "archived"):
             status = "ready_for_merge"
         relay_fields = {"relay_draft": True, "by": holder}
+        if task_id and status:
+            cur = next((x for x in decisions(slug) if x["task_id"] == task_id), None)
+            if cur and cur.get("status") in USER_FINAL:
+                # 2026-10-03 接手积压：代理 Leader sol-6-3 把用户早已采纳 / 取消的决策重新收集，状态打回「待拍板」。
+                # 用户定过的，代理不改状态，只留一条备注
+                relay_fields = {"relay_note": f"代理 {holder} 想把状态改成 {status}，已忽略：用户已定为 {cur.get('status')}"}
+                status = ""
+            elif status == "ready_for_merge" and ((B.find_meta(task_id) or (None, None))[0] or {}).get("mode") in ("build", "review"):
+                # 施工 / 审查任务的收集汇总不进「待拍板」：结果由落地推进器跟进（合并 / 退回 / 重派），22 条占位汇总曾挤满待拍板
+                status = "archived"
+                relay_fields["archive_reason"] = "代理 Leader 对施工 / 审查任务的汇总：结果由落地推进器跟进，不需要拍板"
     if bridge:
         set_bridge_url(bridge)
         changed.append("bridge_url")
@@ -1918,32 +1941,132 @@ def dispatch_race(payload: dict) -> dict:
             "listening": listening, "offline": r.get("offline", [])}
 
 
+def _implement_precheck(slug: str, task_id: str, ignore_command: str = "") -> tuple:
+    """派落地的共用前置检查（必须在 implementation_mutex 内调用）：排队和直接派两条路径「同一任务不重复建单」用同一套判据。
+    返回 (决策记录, None) 可以派；(决策记录, 结果) 命中幂等或已完成；非法状态抛 ValueError。
+    ignore_command：守护自动直派时，队列里那条 implement 指令就是它自己要接手的，不算重复。"""
+    rec = next((x for x in decisions(slug) if x["task_id"] == task_id), None)
+    if not rec:
+        raise ValueError(f"没有决策 {task_id}")
+    if rec.get("status") != "adopted":
+        raise ValueError("只有已采纳的决策才能派落地")
+    if rec.get("execution") in ("released", "n-a"):
+        return rec, {"ok": True, "dedup": True, "command_id": "", "state": "merged", "note": "该事项已完成或无需实施"}
+    snap = implementation_snapshot()
+    cur = snap["project_commands"].get((slug, task_id))
+    if cur and cur["id"] != ignore_command:
+        return rec, {"ok": True, "dedup": True, "command_id": cur["id"], "state": cur["state"], "queue_pos": cur["pos"], "note": f"已在队列 · 第 {cur['pos']} 位" if cur["pos"] else "Leader 正在处理"}
+    build_id = rec.get("implementation_task_id") or task_id
+    b = snap["builds"].get(build_id)
+    if b:
+        merged = any(t.get("merged") for t in (b.get("teammates") or {}).values())
+        return rec, {"ok": True, "dedup": True, "command_id": "", "build_task_id": build_id, "state": "merged" if merged else "building", "note": "已有施工单：" + "、".join((b.get("teammates") or {}).keys())}
+    if rec.get("implementation_task_id"):
+        raise ValueError("关联的施工记录缺失，请先核验恢复；为避免重复施工，本次不自动重派")
+    return rec, None
+
+
+def _enqueue_implement(slug: str, task_id: str, rec: dict, by: str, comment: str) -> dict:
+    pos = sum(1 for c in implementation_snapshot()["project_commands"].values() if c["state"] == "queued") + 1
+    cmd = push_command("implement", {"project": slug, "task_id": task_id, "merge_path": rec.get("merge_path", ""), "title": rec.get("title", ""), "comment": comment or rec.get("user_comment", ""), "requested_by": by})
+    if rec.get("execution") != "pending":
+        upsert_decision(slug, task_id, execution="pending", execution_by=by, execution_at=B.now_iso())
+    return {"ok": True, "dedup": False, "command_id": cmd["id"], "state": "queued", "queue_pos": pos, "note": f"已排入 Leader 队列 · 第 {pos} 位"}
+
+
 def request_implement(slug: str, task_id: str, by: str = "user", comment: str = "") -> dict:
     # Web adopt/nudge and MCP recovery share one cross-process check-and-enqueue lock.
     with implementation_mutex(COMMANDS):
-        rec = next((x for x in decisions(slug) if x["task_id"] == task_id), None)
-        if not rec:
-            raise ValueError(f"没有决策 {task_id}")
-        if rec.get("status") != "adopted":
-            raise ValueError("只有已采纳的决策才能派落地")
-        if rec.get("execution") in ("released", "n-a"):
-            return {"ok": True, "dedup": True, "command_id": "", "state": "merged", "note": "该事项已完成或无需实施"}
-        snap = implementation_snapshot()
-        cur = snap["project_commands"].get((slug, task_id))
-        if cur:
-            return {"ok": True, "dedup": True, "command_id": cur["id"], "state": cur["state"], "queue_pos": cur["pos"], "note": f"已在队列 · 第 {cur['pos']} 位" if cur["pos"] else "Leader 正在处理"}
-        build_id = rec.get("implementation_task_id") or task_id
-        b = snap["builds"].get(build_id)
-        if b:
-            merged = any(t.get("merged") for t in (b.get("teammates") or {}).values())
-            return {"ok": True, "dedup": True, "command_id": "", "build_task_id": build_id, "state": "merged" if merged else "building", "note": "已有施工单：" + "、".join((b.get("teammates") or {}).keys())}
-        if rec.get("implementation_task_id"):
-            raise ValueError("关联的施工记录缺失，请先核验恢复；为避免重复施工，本次不自动重派")
-        cmd = push_command("implement", {"project": slug, "task_id": task_id, "merge_path": rec.get("merge_path", ""), "title": rec.get("title", ""), "comment": comment or rec.get("user_comment", ""), "requested_by": by})
-        if rec.get("execution") != "pending":
-            upsert_decision(slug, task_id, execution="pending", execution_by=by, execution_at=B.now_iso())
-        pos = sum(1 for c in snap["project_commands"].values() if c["state"] == "queued") + 1
-        return {"ok": True, "dedup": False, "command_id": cmd["id"], "state": "queued", "queue_pos": pos, "note": f"已排入 Leader 队列 · 第 {pos} 位"}
+        rec, dedup = _implement_precheck(slug, task_id)
+        return dedup or _enqueue_implement(slug, task_id, rec, by, comment)
+
+
+BUILD_DIRECT_TAIL = """
+
+## 派单说明（工作台直接派，不经 Leader 排队）
+- 只在你自己的 worktree 分支上改；不 merge、不 push main、不动别人的 worktree。
+- 先确认 main 是否已经包含所需改动：已包含就在回复里说明并给出证据（文件与行号），不要做空提交。
+- 改完跑 `py -3 scripts/run_tests.py`；涉及 web/v2 的改动不得让 `tests/smoke_design_ratchet.mjs` 的计数上升。
+- 修 bug 先写能复现的测试；测试只能用临时目录，不能依赖 peers/ projects/ 等真实运行数据。
+- 回执区分 [已验证]（附命令与输出）与 [推断]，并写清怎么回滚。审查通过后由落地推进器自动合并。"""
+
+
+def dispatch_implement(slug: str, task_id: str, by: str = "user", comment: str = "", ignore_command: str = "", ttl_min: int = 45) -> dict:
+    """直接派施工（5a9b51f 的思路在当前 main 上重做）：已采纳决策的「最终方案」当场以 build 模式派给一个正在等任务的
+    施工 Agent，不等 Leader 领指令。与排队同一套幂等判据；没人在等或合并稿读不出方案时退回 Leader 队列，不空开工作副本。"""
+    import bus_reassign as RA
+    queued = ""
+    if not ignore_command:
+        # 用户在「已在队列」时点直接派：顶替那条还没被 Leader 领走的排队指令（已被领走的不抢）
+        cur = implementation_snapshot()["project_commands"].get((slug, task_id))
+        if cur and cur.get("state") == "queued":
+            queued = ignore_command = cur["id"]
+    with implementation_mutex(COMMANDS, timeout=20):   # 开工作副本是 git 操作，比排队慢
+        rec, dedup = _implement_precheck(slug, task_id, ignore_command=ignore_command)
+        if dedup:
+            return dedup
+        builder = RA.pick_free_target("", [], role="builder")
+        if not builder:
+            if queued:
+                return {"ok": True, "dedup": True, "command_id": queued, "state": "queued", "note": "没有正在等任务的施工 Agent，仍在 Leader 队列里"}
+            if ignore_command:
+                return {"ok": False, "note": "没有正在等任务的施工 Agent"}
+            out = _enqueue_implement(slug, task_id, rec, by, comment)
+            out.update(queued_instead=True, note="没有正在等任务的施工 Agent，" + out["note"])
+            return out
+        try:
+            pack = export_task_pack(slug, task_id)
+        except MergePathError as e:
+            if ignore_command and not queued:
+                return {"ok": False, "note": f"合并稿读不出最终方案（{e.code}），留给 Leader 补范围"}
+            out = _enqueue_implement(slug, task_id, rec, by, comment)
+            out.update(queued_instead=True, note=f"合并稿读不出最终方案（{e.code}），{out['note']}")
+            return out
+        repo_dir = load_project(slug).get("repo_dir") or B.WORKSPACE
+        extra = f"\n\n## 用户补充\n{comment.strip()}" if str(comment or "").strip() else ""
+        r = B.dispatch(CONTROLLER, [builder], "build", pack["markdown"] + extra + BUILD_DIRECT_TAIL, [], int(ttl_min), repo_dir=repo_dir)
+        upsert_decision(slug, task_id, implementation_task_id=r["task_id"], execution="pending", execution_by=by, execution_at=B.now_iso())
+    if queued:
+        ack_command(queued, f"task_id: {r['task_id']}\n用户在工作台直接派给 {builder} 施工，这条排队指令不再需要 Leader 处理")
+    return {"ok": True, "dedup": False, "direct": True, "build_task_id": r["task_id"], "builder": builder, "state": "building",
+                "note": f"已直接派给 {builder} 施工（不经 Leader）"}
+
+
+IMPLEMENT_DIRECT_AFTER_SEC = 600   # 排队的「实施」指令等这么久、且没有 Leader 在线，守护直接派施工
+
+
+def auto_implement(limit: int = 2) -> list:
+    """守护每圈调用：采纳是用户做的决定，实施是机械执行，不该卡在 Leader 在不在线上。
+    条件（全部满足才动）：没有真 Leader 会话在线、租约不在代理 Leader 手里、指令排队超过 IMPLEMENT_DIRECT_AFTER_SEC、有正在等任务的施工 Agent。
+    派出后用「task_id: <施工单>」回执这条指令（_ack_command 据此把施工单挂到决策上）。开关：roles.json policy.implement_direct（缺省开）。"""
+    if (_roles_or_empty().get("policy") or {}).get("implement_direct", True) is False or live_leader_sessions():
+        return []
+    holder = (B.lease() or {}).get("holder") or ""
+    if holder and holder != CONTROLLER and B.peer_state(holder).get("online"):
+        return []   # 代理 Leader 在岗：交给它
+    done = []
+    for f in sorted(os.listdir(COMMANDS)) if os.path.isdir(COMMANDS) else []:
+        if len(done) >= limit or not f.endswith(".json"):
+            continue
+        c = B.read_json(os.path.join(COMMANDS, f), None) or {}
+        p = c.get("payload") or {}
+        if c.get("kind") != "implement" or not p.get("project") or not p.get("task_id"):
+            continue
+        age = B.age_sec(c.get("created"), 0.0)
+        if age is None or age < IMPLEMENT_DIRECT_AFTER_SEC:
+            continue
+        try:
+            r = dispatch_implement(p["project"], p["task_id"], by="auto", comment=str(p.get("comment") or ""), ignore_command=c["id"])
+        except ValueError as e:
+            r = {"ok": False, "note": str(e)}
+        if r.get("direct"):
+            ack_command(c["id"], f"task_id: {r['build_task_id']}\n工作台直接派给 {r['builder']} 施工：没有 Leader 在线，指令排队 {int(age // 60)} 分钟")
+        elif r.get("dedup"):
+            ack_command(c["id"], f"无需再派：{r.get('note')}")
+        done.append({"command": c["id"], "task_id": p["task_id"], **{k: v for k, v in r.items() if k in ("direct", "builder", "build_task_id", "note")}})
+        if not r.get("direct") and "没有正在等任务" in str(r.get("note")):
+            break   # 没人可派：后面的都一样
+    return done
 
 
 def _tokens(text: str) -> set:

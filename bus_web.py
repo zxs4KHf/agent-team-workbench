@@ -121,12 +121,22 @@ def _sniff(raw: bytes) -> str:
 
 # 合并稿「已交付」的明示写法：只在行首（可带列表符 / 加粗 / 「结论：」前缀）匹配，且只看「## 验证依据」之前的正文；
 # 叙述性的「……已落地……」出现在句中不算（22:50 c695 采纳时被这种句子误判成 released）
-IMPLEMENTED_LINE_RE = re.compile(r"^\s*(?:[-*>]\s*)?(?:\*\*)?(?:结论[:：]\s*)?(?:本任务|本轮|本方案|本次)?(?:已实施并上线|已上线|已落地并合并|已合并进主线|无需实施|不需要改动|本任务只定方案[^\n]*已排)", re.M)
+IMPLEMENTED_LINE_RE = re.compile(r"^\s*(?:[-*]\s*)?(?:\*\*)?(?:结论[:：]\s*)?(?:本任务|本轮|本方案|本次)?(?:已实施并上线|已上线|已落地并合并|已合并进主线|无需实施|不需要改动|本任务只定方案[^\n]*已排)(?P<rest>[^\n]*)$", re.M)
+# 079b：一句话后面还带着疑问、转折、「仍需 / 还要 / 待」时，说明还有活没做，不能据此把决策标成已落地
+_NOT_DONE_TAIL = re.compile(r"[?？]|但|然而|仍|还需|还要|尚未|待|除了|以外|之外")
 
 
 def declares_implemented(txt: str) -> bool:
+    """缺「最终方案」段时的兜底：全文有一行完整、明确地声明整件事已实施 / 不需要改动，才算。
+    不认：引用块（> 开头）和代码块里的句子、疑问句、带转折或「仍需」的半句（「不需要改动前端，但仍需要实施后端修复」）。"""
     head = (txt or "").split("## 验证依据", 1)[0]
-    return bool(IMPLEMENTED_LINE_RE.search(head))
+    head = re.sub(r"^```.*?^```", "", head, flags=re.S | re.M)   # 代码块里的示例句不算
+    for m in IMPLEMENTED_LINE_RE.finditer(head):
+        rest = m.group("rest").strip().strip("*").strip()
+        # 关键词后面要么结束，要么紧跟标点（「不需要改动前端」只说了一部分，不算）；剩下的不能有疑问、转折、「仍需」
+        if (not rest or rest[0] in "。.，,；;！!（(:：、") and not _NOT_DONE_TAIL.search(rest):
+            return True
+    return False
 
 
 # 热重载白名单：业务模块按依赖序重载，监听 socket 与已建立连接（SSE）不受影响。
@@ -745,6 +755,18 @@ class Handler(BaseHTTPRequestHandler):
                 host, port, no_plugins = getattr(self.server, "restart_argv", ("127.0.0.1", 8765, False))
                 threading.Thread(target=_delayed_restart, args=(host, port, no_plugins), daemon=True).start()
                 return self.send_json({"ok": True, "note": "新进程启动中，本进程即将退出；页面会自动重连"})
+            if u.path == "/api/implement/direct":
+                # 已采纳的决策直接派给正在等任务的施工 Agent（不经 Leader）；没人可派时退回 Leader 队列
+                return self.send_json(P.dispatch_implement(str(body.get("project") or ""), str(body.get("task_id") or ""),
+                                                           by="user", comment=str(body.get("comment") or "")))
+            if u.path == "/api/handback":
+                # 收回 Leader：代理持有租约时写交回请求，代理下一次等待指令时交回
+                if self.client_address[0] not in ("127.0.0.1", "::1"):
+                    return self.send_json({"error": "只允许本机操作"}, 403)
+                try:
+                    return self.send_json(P.request_handback(by="user"))
+                except ValueError as e:
+                    return self.send_json({"error": str(e)}, 409)
             if u.path == "/api/guard/restart":
                 # 一键拉起：写请求文件，由 bus_guard 在下一个巡检周期执行；守护本身没起来时先拉守护
                 if self.client_address[0] not in ("127.0.0.1", "::1"):
@@ -821,7 +843,7 @@ class Handler(BaseHTTPRequestHandler):
                         r = {"task_id": payload["task_id"], "from": payload["peer"], "listening": True,
                              **RA._reassign_build(payload["task_id"], payload["peer"], by="user", listening_only=True)}
                     else:
-                        to = payload.get("to", "") or RA.pick_free_target(payload["peer"], list(meta.get("peers") or []))
+                        to = payload.get("to", "") or RA.pick_free_target(payload["peer"], list(meta.get("peers") or []) + [B.review_author(meta)])
                         r = B.reassign(payload["task_id"], payload["peer"], to, by="user")
                     P.push_command("external", {"note": f"reassign {r['task_id']} {r['from']} -> {r['to']}"})
                     return self.send_json({"ok": True, **r})

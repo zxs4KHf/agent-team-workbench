@@ -60,6 +60,13 @@ class FlakyRunnerTest(unittest.TestCase):
         self.assertNotEqual(res[1], 0)
         self.assertEqual(res[4], "稳定失败")
 
+    def test_digest_keeps_fail_lines_cut_off_by_tail(self):
+        out = "PASS a\nFAIL  反向对照：说明滚动后丢掉\n" + "PASS x\n" * 500
+        d = R.digest(out)
+        self.assertIn("FAIL  反向对照", d, "只留结尾时这行会被截掉")
+        self.assertTrue(d.endswith("PASS x\n"))
+        self.assertEqual(R.digest("PASS\nFAIL z"), "PASS\nFAIL z", "失败行已在结尾里就不重复")
+
     def test_no_retry_flag(self):
         self.fake(1)
         self.assertNotEqual(R.run_browser("ui_b.py", 10, {"ui_b.py"}, retry=False)[1], 0)

@@ -77,7 +77,8 @@ class Reliability(unittest.TestCase):
             with K.file_mutex(self.root/'x'/'..'/'nested.mutex', timeout=0.1): pass
     def test_atomic_failure_is_error_and_preserves_old_bytes(self):
         path = self.root/'record.json'; path.write_text('{"old":true}', encoding='utf-8')
-        with mock.patch.object(K.os, 'replace', side_effect=PermissionError('fixture')), mock.patch.object(K.time, 'sleep'):
+        # 2026-10-03 起 Windows 先走 POSIX 改名（K._replace_posix），故障要两条替换路径都注入，约定不变：失败报错、原文件不动
+        with mock.patch.object(K.os, 'replace', side_effect=PermissionError('fixture')), mock.patch.object(K, '_replace_posix', return_value=False), mock.patch.object(K.time, 'sleep'):
             with self.assertRaises(PermissionError): B.write_json(path, {'new': True})
         self.assertEqual(path.read_text(), '{"old":true}')
         self.assertFalse(list(self.root.glob('*.tmp')))

@@ -19,17 +19,17 @@ export function groupOrder() { try { return JSON.parse(localStorage.getItem(GROU
 export function renderPeers() {
   const q = F.filters.peers.trim().toLowerCase();
   const all = agentList(), p = project(), team = new Set(projectPeers(p));
-  const online = all.filter(a => a.online).length, busy = all.filter(a => a.online && a.status === 'busy').length, stale = all.filter(a => a.stale_with_queue).length;
-  const offlineCount = all.filter(a => !a.online && a.peer !== 'controller').length;
+  const online = all.filter(isOn).length, busy = all.filter(a => isOn(a) && a.status === 'busy').length, stale = all.filter(a => a.stale_with_queue).length;
+  const offlineCount = all.filter(a => !isOn(a) && a.peer !== 'controller').length;
   // 被占着不动的单：离线 Agent 手上的全部 + 在线空闲 Agent 的「已领未回」（后端 bus_reassign 同口径再判一次）
-  const heldN = all.reduce((n, a) => n + (!a.online ? (a.queued || 0) + (a.claimed || 0) : a.status !== 'busy' ? (a.claimed || 0) : 0), 0);
+  const heldN = all.reduce((n, a) => n + (!isOn(a) ? (a.queued || 0) + (a.claimed || 0) : a.status !== 'busy' ? (a.claimed || 0) : 0), 0);
   const c = S().controller || {};
   const groups = (S().agent_groups || []).slice();
   const saved = groupOrder(); const pos = id => { const i = saved.indexOf(id); return i < 0 ? 1000 + (groups.find(g => g.id === id)?.order || 0) : i; };
   groups.sort((a, b) => pos(a.id) - pos(b.id));
   const buckets = new Map(groups.map(g => [g.id, []])); const other = [];
   all.filter(a => !q || a.peer.includes(q) || (a.model || '').toLowerCase().includes(q) || displayName(a.peer).toLowerCase().includes(q)).forEach(a => { const g = groupOfAgent(a); (g ? buckets.get(g.id) : other).push(a); });
-  const sortA = (x, y) => (y.online === true) - (x.online === true) || x.peer.localeCompare(y.peer);
+  const sortA = (x, y) => isOn(y) - isOn(x) || x.peer.localeCompare(y.peer);
   return `<div class="view">${head('协作阵列', 'Agent', 'Agent 按模型组归类，同组即同一模型，来源账号不重要。拖动组标题可调整顺序，默认按模型能力与使用频率排列。', `<button type="button" data-action="group-new">${icon('plus')}新建分组</button>${heldN ? `<button type="button" class="primary" data-action="reassign-held" data-peer="" title="离线 Agent 手上的单、在线却空闲的 Agent 已领未回的单，一次改派给在线 Agent">${icon('send')}一键改派 ${heldN} 单</button>` : ''}${offlineCount ? `<button type="button" data-action="wake-all" title="给掉线的 Agent 发唤醒语：Arena 中继接入的直接发进会话，其余复制后粘贴">${icon('send')}唤醒掉线的 ${offlineCount} 个</button>` : ''}${offlineCount ? `<button type="button" class="warn" data-action="peers-prune" title="清理离线超过12小时且无任务的Agent">${icon('trash')}清理离线</button>` : ''}<button type="button" data-action="join-controller">Leader 接入</button><button type="button" class="primary" data-action="join-peer">${icon('plus')}接入 Agent</button>`)}
     ${opsFold(all)}
     <section class="card fit-panel" data-key="fit-peers"><div class="filters fit-head"><div class="search">${icon('search')}<input type="search" placeholder="按名称或模型搜索…" value="${attr(F.filters.peers)}" data-filter="peers" aria-label="搜索 Agent" autocomplete="off"></div><span class="result-count">${all.length} 个 Agent · ${groups.length} 组</span>${saved.length ? `<button type="button" class="small ghost" data-action="reset-group-order">恢复默认顺序</button>` : ''}</div>
@@ -39,8 +39,10 @@ export function renderPeers() {
 }
 
 // ===== 2026-10-02 Agent 页：分组卡片网格（宽屏一行约 5 张），卡里每个 Agent 一个胶囊，点开看全部详情 =====
-const agentTone = a => a.online === false ? 'off' : a.status === 'busy' ? 'info' : a.listening ? 'ok' : a.listening === false ? 'warn' : 'ok';
-const agentStateText = a => a.online === false ? '离线' : a.status === 'busy' ? '作答中' : a.listening ? '在等任务' : a.listening === false ? '在线没在等任务' : '在线';
+// 在线只认 online === true：缺失（心跳文件不完整）按离线算——卡片、计数、排序同一口径（110c：卡片按「不等于 false」、计数按「为真」，缺失时两边对不上）
+export const isOn = a => a.online === true;
+const agentTone = a => !isOn(a) ? 'off' : a.status === 'busy' ? 'info' : a.listening ? 'ok' : a.listening === false ? 'warn' : 'ok';
+const agentStateText = a => a.online === undefined ? '状态未知' : !isOn(a) ? '离线' : a.status === 'busy' ? '作答中' : a.listening ? '在等任务' : a.listening === false ? '在线没在等任务' : '在线';
 function agentPill(a) {
   const tone = agentTone(a), held = (a.queued || 0) + (a.claimed || 0);
   const tip = `${displayName(a.peer)} · ${a.model || '模型未登记'} · ${agentStateText(a)} · 心跳 ${relAge(a.age_sec, a.last_seen)}${held ? ` · 手上 ${held} 单` : ''}${a.strikes ? ` · 领了不做 ×${a.strikes}` : ''}`;
@@ -48,7 +50,7 @@ function agentPill(a) {
   return `<button type="button" class="agent-pill ${tone}" data-action="agent-open" data-peer="${attr(a.peer)}" data-key="${attr(a.peer)}" data-tip="${attr(tip)}"><span class="status-dot ${tone}" aria-hidden="true"></span><span class="truncate">${esc(displayName(a.peer))}</span>${badge}</button>`;
 }
 function groupCard(g, list, team) {
-  const on = list.filter(a => a.online !== false).length, real = g.id !== '_other';
+  const on = list.filter(isOn).length, real = g.id !== '_other';
   const roles = real ? `${g.reviewer ? '<span class="chip info plain" data-tip="在 Reviewer 组：会被派审查">审</span>' : ''}${g.builder ? '<span class="chip plain" data-tip="在施工组：会被派施工">施</span>' : ''}` : '';
   return `<section class="card group-card group-section${on ? '' : ' quiet'}" data-group="${attr(g.id)}" data-key="g:${attr(g.id)}"${real ? ' draggable="true"' : ''}>
     <header class="gc-head">${real ? `<button type="button" class="link" data-action="group-edit" data-group="${attr(g.id)}" data-tip="改名、标签、包含哪些模型、能否审查 / 施工、合并或删除">${esc(g.name || g.id)}</button>` : `<b class="gc-name">${esc(g.name)}</b>`}
@@ -79,7 +81,7 @@ export function groupForm(id) {
 }
 function opsFold(all) {
   const s = S(), leaders = Array.isArray(s.leaders) ? s.leaders.length : 0, al = s.allocator || {};
-  const online = all.filter(a => a.online).length, waiting = all.filter(a => a.listening).length, stale = all.filter(a => a.stale_with_queue).length;
+  const online = all.filter(isOn).length, waiting = all.filter(a => a.listening).length, stale = all.filter(a => a.stale_with_queue).length;
   const mode = { off: '关', preview: '预演', on: '真派' }[al.mode] || '—';
   return `<div class="ops-summary"><span><b>${waiting}</b> 在等任务</span><span><b>${online}</b>/${all.length} 在线</span>${stale ? `<span class="warn-text"><b>${stale}</b> 离线但有排队</span>` : ''}<span>Leader <b>${leaders}</b> 位在线</span><span>自动分配：${mode}</span></div>
     <details class="card pad ops-fold" id="opsFold"><summary>调度：Leader、自动分配、顶替顺序</summary>
@@ -89,7 +91,7 @@ function opsFold(all) {
     </details>`;
 }
 // Leader 身份看板：租约归属 + 心跳倒计时。代理持锁、无租约或 Leader 心跳离线时整卡转琥珀并显示「接管中：X」。
-// 「收回 Leader」只留按钮位并保持禁用：交回走 /api/handback，那是分支 task/20260923-231119-2d14/fable6（commit b4a23c3）的内容，本单不接后端调用。
+// 「收回 Leader」：代理持有租约时可点，POST /api/handback 写交回请求，代理下一次等待指令时交回（f4f5，2026-10-02 接上）。
 // ADR 0012：按积压自动分配。默认「预演」——只显示它会怎么派，你看一段时间觉得对了再切「真派」
 const ALLOC_MODES = [['off', '关'], ['preview', '预演'], ['on', '真派']];
 export function allocatorCard() {
@@ -141,7 +143,7 @@ export function leaderBoard() {
       <span class="grow"></span>
       <span class="muted leader-meta">指令：排队 <b>${esc(String(q.pending ?? 0))}</b> · 处理中 <b>${esc(String(q.claimed ?? 0))}</b></span>
       <span class="muted leader-meta">租约剩余 <b class="mono" data-countdown="${attr(String(ms))}">${esc(fmtLeft(left))}</b></span>
-      <button type="button" class="small ghost" disabled title="TODO(2d14)：交回接口 /api/handback 在该分支实现，本单只留按钮位">收回 Leader</button>
+      <button type="button" class="small ghost" data-action="lead-handback" ${relay ? '' : 'disabled'} title="${relay ? '让代理 Leader 交回租约：它下一次等待指令时交回，真 Leader 接着处理' : '只有代理 Leader 持有租约时才需要收回'}">收回 Leader</button>
     </div>
     ${rows ? `<ul class="leader-list">${rows}</ul>` : ''}
     ${orphan}
@@ -183,14 +185,14 @@ export const RELAY_CARD_KEY = 'relay-card';
 function queueWarnings(a) {
   const bits = [];
   // 2026-10-02：在线不等于能接活——在线、空闲却不在 wait 里，派过去没人领；领了不做被收回的次数也摆出来
-  if (a.online && a.activity === 'idle' && a.listening === false) bits.push(`<span class="chip warn plain" data-tip="心跳在，但没有在等任务（没在调用 bus_wait_task）：派给它的单不会有人领">在线但没在等任务</span>`);
+  if (isOn(a) && a.activity === 'idle' && a.listening === false) bits.push(`<span class="chip warn plain" data-tip="心跳在，但没有在等任务（没在调用 bus_wait_task）：派给它的单不会有人领">在线但没在等任务</span>`);
   if (a.strikes) bits.push(`<span class="chip ${a.benched ? 'danger' : 'warn'} plain" data-tip="24 小时内领了任务 30 分钟没干活、被系统收回改派的次数；满 2 次暂停派单，交出一次回复后恢复">领了不做 ×${a.strikes}${a.benched ? ' · 暂停派单' : ''}</span>`);
   if (a.claimed) bits.push(`<span class="chip warn plain" data-tip="任务包已被某个会话领走却一直没回复；不会再被别人领取，需要人工回收">已领未回 ${a.claimed}</span>`);
   if (a.expired) bits.push(`<span class="chip bad plain" data-tip="过了 deadline 仍没有被领取">已过期 ${a.expired}</span>`);
   return bits.length ? `<div class="row wrap" style="gap:6px">${bits.join('')}</div>` : '';
 }
 function agentCard(a, inTeam) {
-  const online = a.online !== false, meta = agentMeta(a.peer);
+  const online = isOn(a), meta = agentMeta(a.peer);
   const state = !online ? '离线' : a.status === 'busy' ? '作答中' : a.status === 'relay' ? '接力中' : '空闲待命';
   return `<article class="card agent hover ${online ? '' : 'off'}" data-key="${attr(a.peer)}">
     <header><span class="avatar ${online ? '' : 'off'}">${esc(initials(displayName(a.peer)))}</span><div class="min0 grow"><b class="truncate">${esc(displayName(a.peer))}</b><small class="truncate">${esc(a.model || '模型未登记')}</small></div><span class="chip ${online ? (a.status === 'busy' ? 'info live' : 'ok') : 'bad'}">${esc(state)}</span></header>
