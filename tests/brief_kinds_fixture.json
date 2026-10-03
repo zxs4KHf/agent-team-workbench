@@ -1,0 +1,15 @@
+{
+  "_comment": "卡片类型规则的共用用例：web/v2/js/views.js 的 briefKindOf 与 bus_projects.py 的 brief_kind_of 各自读这份文件。改任何一边的规则，两边的测试都会红，防止前后端各写一份后悄悄漂移。",
+  "cases": [
+    { "name": "审查单只看 mode", "d": { "mode": "review" }, "kind": "review" },
+    { "name": "审查单即使登记了交付物也是审查卡", "d": { "mode": "review", "artifacts": [{ "path": "a.md" }] }, "kind": "review" },
+    { "name": "登记了带 path 的交付物是交付物卡", "d": { "artifacts": [{ "path": "web/a.js", "kind": "code" }] }, "kind": "artifact" },
+    { "name": "讨论模式登记了交付物也是交付物卡", "d": { "mode": "discuss", "artifacts": [{ "path": "docs/x.md" }] }, "kind": "artifact" },
+    { "name": "交付物没有 path 不算", "d": { "artifacts": [{ "path": "" }, { "label": "x" }] }, "kind": "plan" },
+    { "name": "交付物里混了空值和裸字符串不算", "d": { "artifacts": [null, "web/a.js"] }, "kind": "plan" },
+    { "name": "空交付物列表", "d": { "artifacts": [] }, "kind": "plan" },
+    { "name": "artifacts 不是列表", "d": { "artifacts": "web/a.js" }, "kind": "plan" },
+    { "name": "讨论模式是方案卡", "d": { "mode": "discuss" }, "kind": "plan" },
+    { "name": "什么都没有也是方案卡", "d": {}, "kind": "plan" }
+  ]
+}

@@ -1,0 +1,24 @@
+{
+  "id": "arena",
+  "name": "Arena",
+  "version": "1.0.0",
+  "api": "workbench-plugin/1",
+  "kind": "panel",
+  "description": "Arena 账号池、会话池、模型组、榜单与中继（OpenAI / Anthropic 兼容接口）。可选功能：关掉后工作台照常运行，Agent 分组由工作台自己管。",
+  "entry": ["python", "main.py"],
+  "page": "web/index.html",
+  "proxy": {"port": "port"},
+  "wake": "wake",
+  "config": {
+    "port": 9091,
+    "arenax_root": "",
+    "arenax_url": "http://127.0.0.1:9090",
+    "arenax_proxy": "http://127.0.0.1:7892"
+  },
+  "config_help": {
+    "port": "控制面端口；外部客户端（Claude Code 等）走这个端口的 /v1 中继",
+    "arenax_root": "ArenaX 登录器所在目录（含 run_server.py）；留空＝不由插件拉起 ArenaX",
+    "arenax_url": "ArenaX 地址，只用来确定它的端口",
+    "arenax_proxy": "ArenaX 出网代理；留空＝不走代理"
+  }
+}

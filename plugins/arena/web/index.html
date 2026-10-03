@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="/v2/js/boot.js"></script>
+<title>Arena · Agent 协作台</title>
+<link rel="stylesheet" href="/v2/styles/tokens.css">
+<link rel="stylesheet" href="/v2/styles/base.css">
+<link rel="stylesheet" href="/v2/styles/components.css">
+<link rel="stylesheet" href="/v2/styles/hub.css">
+<link rel="stylesheet" href="arena.css">
+</head>
+<body class="hub arena-plugin">
+<a class="sr-only" href="#arenaMain">跳到主内容</a>
+<header class="hub-top">
+  <a class="hub-back" href="/" aria-label="返回工作台"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg><span>工作台</span></a>
+  <div class="hub-title"><h1>Arena</h1><p>可选插件：账号池、会话池、模型组、榜单与中继。关掉插件不影响工作台。</p></div>
+</header>
+<nav class="hub-tabs" id="arenaTabs" role="tablist" aria-label="Arena 分区"></nav>
+<main id="arenaMain" class="hub-main" role="tabpanel" tabindex="-1"></main>
+<div id="backdrop" class="backdrop"></div>
+<aside id="drawer" class="drawer" aria-hidden="true" inert aria-labelledby="drawerTitle" role="dialog" aria-modal="true">
+  <div class="drawer-head"><div class="min0 grow"><h2 id="drawerTitle">详情</h2><p id="drawerSubtitle"></p></div><button type="button" class="ghost icon x" data-action="close-drawer" aria-label="关闭"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg></button></div>
+  <div id="drawerBody" class="drawer-body"></div>
+  <div id="drawerFoot" class="drawer-foot"></div>
+</aside>
+<div id="dialog" class="dialog"></div>
+<div id="toasts" class="toasts"></div><!-- 8c2b：不再整容器 aria-live，逐条 toast 自带 role（transient=presentation / normal=status / sticky=alert） -->
+<script type="module" src="app.js"></script>
+<script src="/v2/js/tip.js" defer></script>
+</body>
+</html>

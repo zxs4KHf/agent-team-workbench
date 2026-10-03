@@ -1,0 +1,27 @@
+{
+  "id": "daily-assistant",
+  "name": "个人助理数据源",
+  "version": "1.1.0",
+  "api": "workbench-plugin/1",
+  "kind": "source",
+  "description": "读取个人助理已采集的小米待办、小米笔记、飞书、四象限，把新增且未完成的条目送进收件箱等你确认。",
+  "entry": ["python", "main.py"],
+  "config": {
+    "collected_dir": "~/.config/daily-assistant/data/collected",
+    "sources": ["xiaomi", "xiaomi-notes", "feishu", "quadrant"],
+    "keywords": "(#todo|@agent|@协作台|派给|让 ?agent|待办|截止|deadline|重力回廊|工作台|协作台|对读|LD|关卡)",
+    "poll_sec": 10,
+    "lookback_days": 1,
+    "ok_missing": "fail",
+    "fail_rounds": 3
+  },
+  "config_help": {
+    "collected_dir": "个人助理采集结果所在目录",
+    "sources": "要读取的来源（文件名后缀）",
+    "keywords": "只收命中这个正则的条目；留空表示全部未完成新条目都进收件箱",
+    "poll_sec": "多少秒检查一次文件变化",
+    "lookback_days": "除今天外再看几天前的文件（跨零点时用）",
+    "ok_missing": "采集文件没有 ok 字段（或是纯列表）时怎么算：fail = 视为采集失败（默认）；accept = 当作成功读取",
+    "fail_rounds": "所有来源连续多少轮采集失败后插件以退出码 3 退出（默认 3）"
+  }
+}

@@ -1,0 +1,72 @@
+{
+  "version": "2026-09-28",
+  "terms": {
+    "lead": {
+      "zh": "Leader",
+      "id": "controller",
+      "desc": "唯一的调度者，界面上直接写 Leader：拆题、派发、合并、向用户汇报。不亲自写代码，不亲自做审查。"
+    },
+    "teammate": {
+      "zh": "Agent",
+      "desc": "接任务干活的模型会话，界面上直接写 Agent。"
+    },
+    "reviewer": {
+      "zh": "Reviewer",
+      "desc": "只审不写：跑 lint、测试、读 diff，给出 PASS 或 RETURN。build 任务合并前必经。"
+    },
+    "scribe": {
+      "zh": "Scribe",
+      "desc": "把讨论结论沉淀进 docs/，维护决策记录。不改代码。"
+    },
+    "guard": {
+      "zh": "Guard",
+      "id": "bus_guard",
+      "desc": "非模型的常驻进程：服务探活与拉起、领队租约回收。"
+    },
+    "user": {
+      "zh": "用户",
+      "desc": "最终决策人。采纳 / 驳回 / 取消只能由用户在工作台完成。"
+    }
+  },
+  "modes": {
+    "discuss": "方案讨论：只产出 Markdown 结论，没有写权限。",
+    "build": "施工：每个Agent拿到自己的 git worktree，改动以 commit 交付，Leader合并。",
+    "review": "审查：拿到 diff 与检查结果，回复 PASS 或 RETURN 加理由。",
+    "independent": "各自独立回答。",
+    "redteam": "专门挑毛病。",
+    "relay": "接力补细节。"
+  },
+  "assignments": {
+    "reviewer_groups": [ "claude-fable-5",
+      "claude-opus-5",
+      "gpt-6-astra",
+      "gpt-5.6"
+    ],
+    "scribe_groups": [
+      "glm-5.3",
+      "kimi-k3"
+    ],
+    "builder_groups": [
+      "claude-fable-5",
+      "claude-opus-5",
+      "gpt-6-astra",
+      "gpt-5.6",
+      "glm-5.3",
+      "kimi-k3",
+      "deepseek-flash",
+      "qwen3.8-max"
+    ]
+  },
+  "policy": {
+    "review_required_for_build": true,
+    "review_prefer_other_group": true,
+    "merge_by": "lead",
+    "worktree_dir": ".wt",
+    "branch_prefix": "task/",
+    "gates": [
+      "py_compile",
+      "node_check"
+    ]
+  },
+  "naming_rule": "角色名一律用英文原词：Leader / Agent / Reviewer / Scribe / Guard；只有「用户」用中文。不再出现 主控、领队、队友、审查员、记录员。"
+}

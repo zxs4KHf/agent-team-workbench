@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#f4f5f2" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0f1310" media="(prefers-color-scheme: dark)">
+<meta name="view-transition" content="same-origin">
+<!-- 防闪：样式表加载前就把主题属性与缩放系数写进 <html>，逻辑与 prefs.js 的 resolveMode / accentVars / accentInk 逐条对齐，否则首帧与刷新后不一致 -->
+<script src="/v2/js/boot.js"></script>
+<title>Agent 协作台</title>
+<link rel="stylesheet" href="/v2/styles/tokens.css">
+<link rel="stylesheet" href="/v2/styles/base.css">
+<link rel="stylesheet" href="/v2/styles/components.css">
+</head>
+<body>
+<a class="sr-only" href="#content">跳到主内容</a>
+<div class="app">
+  <header class="topbar">
+    <div class="brand" translate="no"><span class="brand-mark" role="button" tabindex="0" data-action="edit-brand" aria-label="编辑品牌标识">对</span><span class="brand-text"><span class="inline-edit" data-inline="brand" data-field="title" contenteditable="true" spellcheck="false">Agent 协作台</span><small class="inline-edit" data-inline="brand" data-field="subtitle" contenteditable="true" spellcheck="false">COLLABORATIVE WORKBENCH</small></span></div>
+    <div class="project-switch"><label class="sr-only" for="projectSelect">当前项目</label><select id="projectSelect"></select><button type="button" class="ghost icon" data-action="new-project" aria-label="新建项目" data-tip="新建项目"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button></div>
+    <div class="top-actions">
+      <button type="button" class="primary" id="dispatchBtn" data-action="dispatch" aria-label="派发任务" data-tip="派发任务 (N)"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></svg><span>派发任务</span></button>
+      <a class="ghost hub-link" id="hubLink" href="/hub" data-tip="扩展与来源：收件箱、体验反馈、插件" aria-label="扩展与来源"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg><span>扩展与来源</span><b id="hubBadge" hidden></b></a>
+      <button type="button" class="cmdk-hint" data-action="cmdk" aria-label="打开命令面板"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><span>搜索或执行…</span><kbd>Ctrl K</kbd></button>
+      <div id="service" class="service"><i></i><span>连接中…</span></div>
+      <button type="button" class="ghost icon" data-action="refresh" aria-label="刷新" data-tip="刷新 (R)"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11A8 8 0 1 0 18.3 16"/><path d="M20 4v7h-7"/></svg></button>
+    </div>
+  </header>
+  <div class="layout">
+    <aside class="sidebar"><nav id="nav" class="nav" aria-label="工作台导航"></nav><div id="sideStats" class="side-stats"></div></aside>
+    <main class="content" id="main"><div id="banner" class="banner" hidden role="status"></div><div id="leadEvents" class="lead-events" hidden role="status" aria-live="polite"></div><div id="content"></div></main>
+  </div>
+</div>
+<div id="backdrop" class="backdrop"></div>
+<aside id="drawer" class="drawer" aria-hidden="true" inert aria-labelledby="drawerTitle" role="dialog" aria-modal="true">
+  <div class="drawer-head"><div class="min0 grow"><h2 id="drawerTitle">详情</h2><p id="drawerSubtitle"></p></div><button type="button" class="ghost icon x" data-action="close-drawer" aria-label="关闭"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg></button></div>
+  <div id="drawerBody" class="drawer-body"></div>
+  <div id="drawerFoot" class="drawer-foot"></div>
+</aside>
+<div id="dialog" class="dialog"></div>
+<div id="cmdk" class="cmdk"><div class="panel"><label class="sr-only" for="cmdkInput">命令</label><input id="cmdkInput" type="text" placeholder="输入命令、任务名或 Agent…" autocomplete="off" spellcheck="false"><div id="cmdkList" class="list" role="listbox"></div><div class="foot"><span><kbd>↑</kbd><kbd>↓</kbd> 选择</span><span><kbd>Enter</kbd> 执行</span><span><kbd>Esc</kbd> 关闭</span><span><kbd>1</kbd>–<kbd>7</kbd> 切换视图</span><span><kbd>/</kbd> 搜索</span></div></div></div>
+<div id="toasts" class="toasts"></div><!-- 8c2b：不再整容器 aria-live，逐条 toast 自带 role（transient=presentation / normal=status / sticky=alert） -->
+<script src="/v2/js/image_types.js"></script>
+<script type="module" src="/v2/js/app.js"></script>
+<script src="/v2/js/feedback.js" defer></script>
+<script src="/v2/js/tip.js" defer></script>
+<script src="/v2/js/hub_badge.js" defer></script>
+</body>
+</html>

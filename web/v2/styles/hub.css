@@ -1,0 +1,76 @@
+/* 扩展与来源页：只用 tokens.css 的变量，主题/强调色与工作台一致 */
+body.hub{min-height:100vh;background:var(--bg);color:var(--text);font-family:var(--font)}
+.hub-top{position:sticky;top:0;z-index:5;display:flex;align-items:center;gap:var(--sp-4);padding:14px clamp(16px,4vw,40px);background:color-mix(in srgb,var(--bg) 86%,transparent);backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
+.hub-back{display:inline-flex;align-items:center;gap:4px;padding:6px 10px 6px 6px;border-radius:var(--r-ctl);color:var(--muted);text-decoration:none;border:1px solid transparent}
+.hub-back:hover{color:var(--text);border-color:var(--line);background:var(--surface)}
+.hub-title{flex:1;min-width:0}.hub-title h1{margin:0;font-size:var(--fs-4)}.hub-title p{margin:2px 0 0;color:var(--muted);font-size:var(--fs-1)}
+.hub-tabs{display:flex;gap:4px;padding:10px clamp(16px,4vw,40px) 0;border-bottom:1px solid var(--line);overflow-x:auto}
+.hub-tabs button{position:relative;padding:8px 14px 10px;border:0;background:none;color:var(--muted);font:inherit;font-weight:500;cursor:pointer;white-space:nowrap}
+/* 标签栏 overflow-x:auto 会连带裁掉纵向溢出，环底边被吃，改为内收 */
+.hub-tabs button:focus-visible{outline-offset:-2px}
+.hub-tabs button:hover{color:var(--text)}
+.hub-tabs button[aria-selected=true]{color:var(--text)}
+.hub-tabs button[aria-selected=true]::after{content:"";position:absolute;left:10px;right:10px;bottom:-1px;height:2px;border-radius:2px;background:var(--accent);animation:hubBar var(--m-base) var(--ease-out)}
+@keyframes hubBar{from{transform:scaleX(.3);opacity:0}}
+.hub-tabs b{margin-left:6px;padding:0 6px;border-radius:999px;background:var(--accent-soft);color:var(--accent-strong);font-size:var(--fs-0);font-weight:600}
+.hub-tabs b:empty{display:none}
+.hub-main{max-width:980px;margin:0 auto;padding:var(--sp-5) clamp(16px,4vw,40px) 96px;outline:none}
+.hub-bar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:var(--sp-4)}
+.hub-bar .grow{flex:1}
+.hub-filter{display:flex;gap:4px;padding:3px;border-radius:var(--r-ctl);background:var(--surface-2);border:1px solid var(--line)}
+.hub-filter button{padding:4px 10px;border:0;border-radius:calc(var(--r-ctl) - 2px);background:none;color:var(--muted);font:inherit;font-size:var(--fs-1);cursor:pointer}
+.hub-filter button[aria-pressed=true]{background:var(--surface);color:var(--text);box-shadow:var(--shadow-sm)}
+.hub-list{display:grid;gap:10px}
+.hub-item{padding:14px 16px;animation:hubIn var(--m-base) var(--ease-out) both}
+.hub-main.settled .hub-item{animation:none}
+.hub-item:nth-child(2){animation-delay:30ms}.hub-item:nth-child(3){animation-delay:60ms}.hub-item:nth-child(n+4){animation-delay:90ms}
+@keyframes hubIn{from{opacity:0;transform:translateY(6px)}}
+@media (prefers-reduced-motion:reduce){.hub-item,.hub-tabs button::after{animation:none!important}}
+.hub-item.leaving{opacity:0;transform:translateX(24px);transition:opacity var(--m-base),transform var(--m-base) var(--ease-out)}
+.hub-item h3{margin:6px 0 4px;font-size:var(--fs-3);line-height:1.35}
+.hub-meta{display:flex;flex-wrap:wrap;align-items:center;gap:6px;color:var(--muted);font-size:var(--fs-0)}
+.hub-text{margin:6px 0 0;color:var(--text);white-space:pre-wrap;word-break:break-word;font-size:var(--fs-1);max-height:9.5em;overflow:hidden;mask-image:linear-gradient(#000 75%,transparent)}
+.hub-text.open{max-height:none;mask-image:none}
+.hub-actions{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:12px}
+.hub-actions .grow{flex:1}
+.hub-actions select,.hub-actions input{padding:6px 8px;border-radius:var(--r-ctl);border:1px solid var(--line);background:var(--surface-2);color:var(--text);font:inherit;font-size:var(--fs-1)}
+.hub-btn{display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border-radius:var(--r-ctl);border:1px solid var(--line);background:var(--surface);color:var(--text);font:inherit;font-size:var(--fs-1);cursor:pointer;transition:background var(--m-fast),border-color var(--m-fast),transform var(--m-fast)}
+a.hub-btn{text-decoration:none}
+.hub-btn:hover{border-color:var(--line-strong)}.hub-btn:active{transform:scale(.97)}
+.hub-btn.go{background:var(--accent);border-color:var(--accent);color:var(--accent-ink);font-weight:600}
+.hub-btn.quiet{border-color:transparent;background:none;color:var(--muted)}.hub-btn.quiet:hover{color:var(--text);background:var(--surface-2)}
+.hub-btn[disabled]{opacity:.5;pointer-events:none}
+.hub-empty{padding:40px 24px;text-align:center;color:var(--muted);border:1px dashed var(--line-strong);border-radius:var(--r-card)}
+.hub-empty strong{display:block;margin-bottom:6px;color:var(--text);font-size:var(--fs-3)}
+.hub-empty code,.hub-help code{padding:1px 5px;border-radius:4px;background:var(--surface-3);font-family:var(--mono);font-size:.92em}
+.hub-next{margin:0 0 var(--sp-4);padding:10px 14px;border-radius:var(--r-card);background:var(--accent-soft);color:var(--accent-strong);font-size:var(--fs-1)}
+.hub-plugin-head{display:flex;align-items:flex-start;gap:12px}
+.hub-plugin-head .grow{flex:1;min-width:0}
+.hub-switch{position:relative;width:42px;height:24px;flex:none;border-radius:999px;border:1px solid var(--line-strong);background:var(--surface-3);cursor:pointer;transition:background var(--m-base)}
+.hub-switch::after{content:"";position:absolute;top:2px;left:2px;width:18px;height:18px;border-radius:50%;background:var(--surface);box-shadow:var(--shadow-sm);transition:transform var(--m-base) var(--ease-spring)}
+.hub-switch[aria-checked=true]{background:var(--accent);border-color:var(--accent)}
+.hub-switch[aria-checked=true]::after{transform:translateX(18px)}
+.hub-cfg{display:grid;grid-template-columns:minmax(120px,180px) 1fr;gap:8px 12px;margin-top:12px;font-size:var(--fs-1)}
+.hub-cfg label{padding-top:6px;color:var(--muted)}
+.hub-cfg input{width:100%;box-sizing:border-box;padding:6px 8px;border-radius:var(--r-ctl);border:1px solid var(--line);background:var(--surface-2);color:var(--text);font-family:var(--mono);font-size:var(--fs-0)}
+.hub-cfg small{grid-column:2;margin-top:-4px;color:var(--faint)}
+.hub-log{max-height:280px;overflow:auto;margin:12px 0 0;padding:10px;border-radius:var(--r-ctl);background:var(--surface-3);font:var(--fs-0)/1.5 var(--mono);white-space:pre-wrap}
+.hub-errs{margin:8px 0 0;padding-left:18px;color:var(--danger);font-size:var(--fs-1)}
+.hub-events{font-size:var(--fs-1)}
+.hub-ev{display:grid;grid-template-columns:92px 170px 1fr;gap:10px;padding:7px 4px;border-bottom:1px solid var(--line)}
+.hub-ev time{color:var(--faint);font-family:var(--mono);font-size:var(--fs-0)}
+.hub-ev code{font-family:var(--mono);font-size:var(--fs-0);color:var(--accent-strong)}
+.hub-ev span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted)}
+.hub-help{margin-top:var(--sp-5);padding:14px 16px;color:var(--muted);font-size:var(--fs-1)}
+.hub-help h4{margin:0 0 6px;color:var(--text)}
+.hub-toast{position:fixed;left:50%;bottom:24px;z-index:50;transform:translate(-50%,20px);padding:10px 16px;border-radius:999px;background:var(--text);color:var(--bg);font-size:var(--fs-1);opacity:0;pointer-events:none;transition:opacity var(--m-base),transform var(--m-base) var(--ease-out)}
+.hub-toast.show{opacity:1;transform:translate(-50%,0)}
+.hub-toast.err{background:var(--danger);color:#fff}
+@media (max-width:640px){.hub-ev{grid-template-columns:1fr}.hub-cfg{grid-template-columns:1fr}.hub-cfg small{grid-column:1}.hub-title p{display:none}}
+/* 冒烟截图后的微调：操作行并排、筛选不折行、实时灯状态色 */
+.hub-actions select{flex:0 1 220px;width:auto;min-width:0}
+.hub-actions input{flex:1 1 200px;width:auto;min-width:0}
+.hub-filter{max-width:100%;overflow-x:auto}.hub-filter button{white-space:nowrap}
+#hubLive i{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--faint)}
+#hubLive.ok i{background:var(--ok);box-shadow:0 0 0 3px var(--ok-soft)}
+#hubLive.bad i{background:var(--warn)}

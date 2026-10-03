@@ -1,0 +1,19 @@
+{
+  "version": "v0.1.0",
+  "exclude": [
+    "docs/history/",
+    "docs/reviews/",
+    "CHANGELOG.md",
+    "tools/jihua/",
+    "tools/grant_admin.bat"
+  ],
+  "scan_allow": [
+    "scripts/export_public.py",
+    "tests/test_export_public_20261002.py"
+  ],
+  "generic_skip": [
+    "tests/",
+    "plugins/arena/server/test_arena.py",
+    "tools/proxy_selftest.py"
+  ]
+}

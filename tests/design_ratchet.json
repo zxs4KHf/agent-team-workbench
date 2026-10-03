@@ -1,0 +1,29 @@
+{
+  "adr": "docs/adr/0011-frontend-refactor.md",
+  "rule": "数只能降不能升。重构后跑 node tests/smoke_design_ratchet.mjs --update 收紧；升高要手改并在合入说明里写理由。",
+  "updated": "2026-10-02",
+  "limits": {
+    "inline_style": 224,
+    "hardcoded_color": 41,
+    "font_size_value": 14,
+    "button_class": 30,
+    "inner_html_assign": 40,
+    "raw_radius": 57
+  },
+  "targets": {
+    "inline_style": 30,
+    "hardcoded_color": 0,
+    "font_size_value": 8,
+    "button_class": 8,
+    "inner_html_assign": 5,
+    "raw_radius": 0
+  },
+  "why": {
+    "inline_style": "模板里的 style=\"…\" 绕过设计变量；改成 components.css 的类",
+    "hardcoded_color": "写死的颜色不跟主题；用 tokens.css 的 --颜色变量（tokens.css / boot.js / prefs.js / index.html 豁免）",
+    "font_size_value": "font-size 写法种类数；只用 --fs-00…--fs-5",
+    "button_class": "按钮 class 组合种类数；阶段 1 收敛为 btn(kind,size)",
+    "inner_html_assign": "整块替换没有过渡、会闪、丢滚动；改走 core.js morph()",
+    "raw_radius": "圆角只用 --r-ctl / --r-card / --r-sheet / --r-pill"
+  }
+}

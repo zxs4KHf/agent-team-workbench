@@ -1,0 +1,11 @@
+<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>notify fixture 5406</title>
+<style>.toast.leaving{opacity:0}.show{display:block}#drawer{display:none}#drawer.show{display:block}</style></head><body>
+<div id="toasts" class="toasts"></div>
+<aside id="drawer" aria-hidden="true"><h2 id="drawerTitle"></h2><p id="drawerSubtitle"></p><div id="drawerBody"></div><div id="drawerFoot"></div></aside><div id="backdrop"></div><div id="dialog"></div>
+<script type="module">
+import * as C from '../web/v2/js/components.js';
+import * as N from '../web/v2/js/notify.js';
+import * as K from '../web/v2/js/core.js';
+window.T = { toast: C.toast, openInbox: C.openInbox, notifyInbox: C.notifyInbox, notify: N.notify, EVENTS: N.EVENTS, api: K.api, ApiError: K.ApiError, redactPath: K.redactPath, scrubText: K.scrubText };
+window.ready = true;
+</script></body></html>

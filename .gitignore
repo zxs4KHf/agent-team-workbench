@@ -1,0 +1,68 @@
+__pycache__/
+*.pyc
+
+# Runtime state and credentials - never commit
+console/mcp_token.txt
+console/bridge.json
+console/controller.lock
+console/controller.lock.last
+console/mcp_process_*.json
+console/mcp_service_*.log
+console/commands/
+console/done/
+
+# Local workspace override
+workspace.local.json
+
+# Scratch scripts from remote agents
+_*.py
+console/ws_run_audit.log
+
+# 本机运行产物与本地设置，不入库
+# profiles/ 是每台机器上 Agent 的显示名 / 负责路径 / 偏好 / 暂停状态，与 settings.json 同类。
+# 507e 合并稿说的「一人一文件便于 git diff」指的是可靠的模板与显式导出，
+# 不等于把本机真实配置自动 commit 进主线（build 模式会自动提交整个工作区）。忽略只影响跟踪，不删除任何已有 profile。
+profiles/
+console/*.log
+settings.json
+
+.wt/
+
+# 跨进程互斥锁文件（bus_locks），运行态，永不入库（F3）
+.workbench-locks/
+*.mutex
+
+# ── 运行数据：本机状态，不入库（docs/WORKFLOW.md §6）──
+# 代码只认这些目录的「位置」，内容由运行时生成；新装时自动创建
+/log/
+/inbox/
+/outbox/
+/peers/
+/attachments/
+/console/
+/projects/
+/events/
+/feedback/
+/plugins.local.json
+/adapters/*.state.json
+/tmp/
+/.runtime/
+/AgentWorkBench_Intake_*/
+*.bak
+*.bak-*
+# 扩展层运行数据（收件箱）
+/intake/
+# Arena：账号与密钥数据、历代 Leader 的临时脚本
+/arena/data/
+/arena/leader/
+/arena/*.bak*
+# Arena 插件单独运行时的数据目录（作为插件运行时数据在 .runtime/plugins/arena/）
+/plugins/arena/server/data/
+/plugins/arena/server/*.bak*
+# 其它 Agent 客户端的本地记忆
+/.workbuddy/
+# 工作区根目录漂移时误落在仓库下的总线运行数据（bus/log 等）
+/workbench/
+
+# 导出公开版用的本机私有关键词（scripts/export_public.py），不入库
+/privacy.local.txt

@@ -1,0 +1,3 @@
+/* Arena 插件页面：沿用工作台 tokens 与组件样式，这里只放插件自己的布局补充 */
+.arena-plugin .hub-main{padding:var(--sp-4) clamp(16px,4vw,40px) var(--sp-6)}
+.arena-plugin .hub-tabs .i{width:1em;height:1em;vertical-align:-2px}

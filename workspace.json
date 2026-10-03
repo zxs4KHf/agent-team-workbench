@@ -1,0 +1,4 @@
+{
+  "_comment": "Workspace served to agents via ws_read/ws_write and the context-file picker. Relative paths resolve against this project. Override with the BUS_WORKSPACE environment variable.",
+  "workspace": "."
+}

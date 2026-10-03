@@ -1,0 +1,82 @@
+:root{
+  --focus-ring:var(--accent);  /* 焦点环：预设=强调色（守卫 ≥4.5）；自定义强调色对底色 <3:1 时 prefs.accentVars 覆盖为 --text（ADR 0007 5a） */
+  color-scheme:light;
+  --bg:#f4f5f2;--surface:#ffffff;--surface-2:#eef1ed;--surface-3:#e7ebe5;
+  --text:#1c241f;--muted:#57625b;--faint:#646e67;--line:#d9dfd9;--line-strong:#c0cbc1;
+  --accent:#28664b;--accent-soft:#e3f0e8;--accent-strong:#1c4d37;--accent-ink:#ffffff;
+  --ok:#28664b;--ok-soft:#e3f0e8;
+  --warn:#956022;--warn-soft:#fff2dc;
+  --danger:#a54848;--danger-soft:#fbe8e8;
+  --info:#386891;--info-soft:#e7f0fa;
+  --violet:#735b9a;--violet-soft:#f0eafb;
+  --shadow-lg:0 18px 44px rgba(26,43,31,.12),0 2px 6px rgba(26,43,31,.06);
+  --shadow-sm:0 3px 12px rgba(26,43,31,.07);
+  --fs-scale:1;--sp-scale:1;--r-scale:1;
+  --r-ctl:calc(8px * var(--r-scale));--r-card:calc(12px * var(--r-scale));--r-sheet:calc(16px * var(--r-scale));--r-pill:999px;
+  --font:ui-sans-serif,-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei UI","Noto Sans CJK SC",sans-serif;
+  --mono:ui-monospace,"SFMono-Regular","Cascadia Code","JetBrains Mono",Consolas,monospace;
+  /* 字号与间距是绝对 px，html{font-size} 对它们无效，缩放只能靠乘系数 */
+  --fs-0:calc(12px * var(--fs-scale));--fs-1:calc(13px * var(--fs-scale));--fs-2:calc(14px * var(--fs-scale));--fs-3:calc(16px * var(--fs-scale));--fs-4:calc(20px * var(--fs-scale));--fs-5:calc(28px * var(--fs-scale));
+  --sp-1:calc(4px * var(--sp-scale));--sp-2:calc(8px * var(--sp-scale));--sp-3:calc(12px * var(--sp-scale));--sp-4:calc(16px * var(--sp-scale));--sp-5:calc(24px * var(--sp-scale));--sp-6:calc(32px * var(--sp-scale));
+  --ease-out:cubic-bezier(.2,.8,.2,1);--ease-emph:cubic-bezier(.16,1,.3,1);
+  --ease-spring:linear(0,.006,.025 2.8%,.101 6.1%,.539 18.9%,.721 25.3%,.849 31.5%,.937 38.1%,.968 41.8%,.991 45.7%,1.006 50.1%,1.015 55%,1.017 63.9%,1.001);
+  --m-fast:120ms;--m-base:200ms;--m-slow:320ms;--m-spring:420ms;
+  --nav-w:224px;--drawer-w:min(560px,92vw);--topbar-h:56px;
+}
+/* 主题走 documentElement.dataset.theme；system 由 JS 决解成 dark / light，所以这里不再有 @media 变量组 */
+:root[data-theme=light]{color-scheme:light}
+:root[data-theme=dark]{
+  color-scheme:dark;
+  --bg:#0f1310;--surface:#161b17;--surface-2:#1c231e;--surface-3:#252e27;
+  --text:#e5ebe5;--muted:#a5b1a7;--faint:#818d83;--line:#29332c;--line-strong:#3a4a3e;
+  --accent:#77c49a;--accent-soft:#1c3628;--accent-strong:#a5dfbc;--accent-ink:#0f1310;
+  --ok:#77c49a;--ok-soft:#1c3628;
+  --warn:#e6ad68;--warn-soft:#3a2c1a;
+  --danger:#ee8c8c;--danger-soft:#402424;
+  --info:#93bce6;--info-soft:#1b2e42;
+  --violet:#c0a7ee;--violet-soft:#2e243e;
+  --shadow-lg:0 18px 44px rgba(0,0,0,.42),0 2px 6px rgba(0,0,0,.3);
+  --shadow-sm:0 4px 14px rgba(0,0,0,.28);
+}
+:root[data-theme=graphite]{
+  color-scheme:dark;
+  --bg:#12151a;--surface:#191d24;--surface-2:#20252d;--surface-3:#2a3038;
+  --text:#e3e8ef;--muted:#a3adba;--faint:#858e99;--line:#2b323b;--line-strong:#3c4653;
+  --accent:#8fb0c9;--accent-soft:#22303b;--accent-strong:#b6d0e2;--accent-ink:#12151a;
+  --ok:#79b99a;--ok-soft:#1f3028;
+  --warn:#e0ac6b;--warn-soft:#332a1c;
+  --danger:#e98f95;--danger-soft:#362126;
+  --info:#8fb8e6;--info-soft:#1e2b3a;
+  --violet:#b7a6e6;--violet-soft:#2a2740;
+  --shadow-lg:0 18px 44px rgba(0,0,0,.5),0 2px 6px rgba(0,0,0,.32);
+  --shadow-sm:0 4px 14px rgba(0,0,0,.3);
+}
+:root[data-theme=sand]{
+  color-scheme:light;
+  --bg:#f6f1e7;--surface:#fffdf8;--surface-2:#efe7d9;--surface-3:#e6dcca;
+  --text:#2b2419;--muted:#655946;--faint:#716551;--line:#ddd2be;--line-strong:#c8baa0;
+  --accent:#8e5b27;--accent-soft:#f4e6d3;--accent-strong:#7d4d1c;--accent-ink:#ffffff;
+  --ok:#546e3e;--ok-soft:#e6eedd;
+  --warn:#8e5b20;--warn-soft:#fbeeda;
+  --danger:#9d4a3c;--danger-soft:#f8e4de;
+  --info:#3f6a86;--info-soft:#e3eef5;
+  --violet:#765c8d;--violet-soft:#efe7f5;
+  --shadow-lg:0 18px 44px rgba(74,58,32,.14),0 2px 6px rgba(74,58,32,.07);
+  --shadow-sm:0 3px 12px rgba(74,58,32,.09);
+}
+:root[data-theme=contrast]{
+  color-scheme:light;
+  --bg:#ffffff;--surface:#ffffff;--surface-2:#f2f2f2;--surface-3:#e4e4e4;
+  --text:#000000;--muted:#2b2b2b;--faint:#555555;--line:#000000;--line-strong:#000000;
+  --accent:#0a57f2;--accent-soft:#dfe8ff;--accent-strong:#0034b8;--accent-ink:#ffffff;
+  --ok:#0a6b2f;--ok-soft:#dcf3e3;
+  --warn:#8a4b00;--warn-soft:#ffe9cc;
+  --danger:#b00020;--danger-soft:#ffdcdf;
+  --info:#00498a;--info-soft:#dcecff;
+  --violet:#5b2ea6;--violet-soft:#ece0ff;
+  --shadow-lg:0 0 0 2px #000;
+  --shadow-sm:0 0 0 1px #000;
+}
+@media(prefers-reduced-motion:reduce){
+  :root{--m-fast:0ms;--m-base:0ms;--m-slow:0ms;--m-spring:0ms}
+}
