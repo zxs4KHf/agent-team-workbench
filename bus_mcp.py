@@ -30,10 +30,27 @@ BUS_TOOL = os.path.join(HERE, "bus_tool.py")
 MAX_WAIT = 590
 READ_LIMIT = 200 * 1024
 RUN_TAIL = 8 * 1024
-_BUS_REL = os.path.relpath(HERE, B.WORKSPACE).replace(os.sep, "/").strip("./")
-_BUS_PREFIX = (_BUS_REL + "/") if _BUS_REL and _BUS_REL != "." else ""
+
+
+def bus_prefix(here: str, workspace: str):
+    """工作台目录相对工作区的前缀：就是工作区本身返回 ""，在工作区里面返回 "子目录/"，在工作区外面返回 None。
+    原来直接 os.path.relpath(...).strip("./")：仓库和工作区不在同一个盘时导入就崩（MCP 起不来，2026-10-10 CI 上 D: / C: 实测），
+    在同一盘的工作区外面时 "../AgentTeamWorkbench" 被剥成 "AgentTeamWorkbench"，算出一个错的前缀。"""
+    try:
+        rel = os.path.relpath(here, workspace).replace(os.sep, "/")
+    except ValueError:      # 不同盘
+        return None
+    if rel == ".":
+        return ""
+    if rel == ".." or rel.startswith("../"):
+        return None
+    return rel + "/"
+
+
+_BUS_PREFIX = bus_prefix(HERE, B.WORKSPACE)
 # Bus control state is written through bus tools only, wherever the workbench lives.
-WRITE_DENY = (".git/", ".shuncode/", _BUS_PREFIX + "console/", _BUS_PREFIX + "peers/")
+# 工作台不在工作区里时，ws_* 本来就够不着它的 console/ peers/，不需要这两条（也不能拿空前缀去挡工作区自己的同名目录）
+WRITE_DENY = (".git/", ".shuncode/") + ((_BUS_PREFIX + "console/", _BUS_PREFIX + "peers/") if _BUS_PREFIX is not None else ())
 RUN_ALLOW = ("py -3 ", "python ", "node ", "npm ", "npx ", "pip ",
              "git status", "git diff", "git log", "git add", "git commit", "git restore", "git show",
              "ls", "dir", "where", "tasklist")

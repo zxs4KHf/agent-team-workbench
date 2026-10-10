@@ -1,5 +1,6 @@
 """Daily workbench discovery uses only the declared proxy and temporary instance data."""
 import json
+import os
 import shutil
 import sys
 import tempfile
@@ -68,7 +69,10 @@ class PluginTest(unittest.TestCase):
 
     def test_only_web_files_are_exposed(self):
         for name in ("index.html", "panel.js", "panel.css"):
-            self.assertEqual(PL.page_path("daily-workbench", "web/" + name), str(self.plugin / "web" / name))
+            # 两边都转成规范长路径再比：CI 的临时目录会出现 8.3 短名（RUNNER~1）与长名两种写法（2026-10-10）
+            got = PL.page_path("daily-workbench", "web/" + name)
+            self.assertTrue(got)
+            self.assertEqual(os.path.normcase(os.path.realpath(got)), os.path.normcase(os.path.realpath(str(self.plugin / "web" / name))))
         for name in ("plugin.json", "README.md", "web/../plugin.json"):
             self.assertEqual(PL.page_path("daily-workbench", name), "")
 
