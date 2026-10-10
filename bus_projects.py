@@ -60,7 +60,7 @@ def prompt_text(kind: str, peer: str = "<PEER>", model: str = "<MODEL>", token: 
     url = link or bridge_url() or "<Bridge MCP URL：Leader尚未登记>"
     auth = f"{chr(10)}连接时带请求头 Authorization: Bearer {token}" if token and not link else ""   # 单独一行：别和地址黏在一起
     peer_arg, model_arg = json.dumps(peer, ensure_ascii=False), json.dumps(model, ensure_ascii=False)
-    cli = f"py -3 {WS_WIN}\\workbench\\bus\\bus_cli.py"
+    cli = "py -3 " + os.path.join(B.ROOT, "bus_cli.py").replace("/", "\\")   # 仓库根目录下；原来拼的是旧结构 <工作区>\workbench\bus\，独立仓库里不存在
     label = B.LN.validate_label(label) if B.LN.features(B.ROOT).get("lead_label", True) else ""
     label_json = json.dumps(label, ensure_ascii=False)  # 显示名当数据引用：JSON 字符串字面量，任何内容都不会闭合边界或被当成指令
     if kind == "controller":
@@ -1396,6 +1396,9 @@ def task_progress(task_id: str) -> dict:
                 states[peer] = "missing"
     expected = [pe for pe in meta["peers"] if pe not in meta.get("offline_at_dispatch", [])] or meta["peers"]
     quorum = meta.get("min_answers") or len(expected)
+    if meta.get("queue_until_claim") and not meta.get("race"):
+        expected = list(meta["peers"])
+        quorum = len(expected)
     # complete = 达到法定份数，或所有在线 peer 都已回答；分母是派发时在线的 peer
     return {"task_id": task_id, "meta": meta, "answered": answered, "states": states, "ages": ages, "expected": expected, "quorum": quorum,
             "complete": len(answered) >= quorum or len(answered) >= len(expected)}
@@ -1406,6 +1409,9 @@ def complete_tasks() -> list:
     out = []
     for f in os.listdir(B.OUTBOX):
         if f.endswith(".meta.json"):
+            meta = B.read_json(os.path.join(B.OUTBOX, f), {}) or {}
+            if meta.get("external_owner"):
+                continue
             pr = task_progress(f[:-10])
             if pr and pr["complete"]:
                 out.append(pr["task_id"])
@@ -1591,12 +1597,22 @@ def normalize_session(session: str) -> str:
 def console_wait(timeout_sec: int, holder: str = CONTROLLER, session: str = "", name: str = "") -> str:
     # Leader（或代理 Leader）阻塞等待：先拿租约，拿不到就不领任何指令；新指令、或某个开放任务的回答已到齐即返回。
     # 多 Leader 并行接入（多活）：真 Leader 的 holder 恒为 controller，session 区分并发会话；
-    # 首次不传 session 时由服务端分配一个，经 IDLE 返回体告知，后续调用原样带回。
+    # 首次不传 session 时由服务端分配一个，经所有 controller wait 返回体告知，后续调用原样带回。
     ensure()
     session = normalize_session(session)
     assigned = False
     if holder == CONTROLLER and not session:
         session, assigned = uuid.uuid4().hex[:8], True
+
+    def respond(text: str) -> str:
+        # Every controller response must return its identity, including commands,
+        # notifications and lease handback. Otherwise the next wait creates a
+        # phantom Leader because the client never received the allocated session.
+        if holder == CONTROLLER and session:
+            suffix = "（首次分配，之后每次 bus_console 调用都用它）" if assigned else ""
+            return f"{text.rstrip()}\nSESSION={session}{suffix}"
+        return text
+
     l = B.acquire_lease(holder)
     if l.get("holder") != holder:
         if holder == CONTROLLER:
@@ -1606,7 +1622,7 @@ def console_wait(timeout_sec: int, holder: str = CONTROLLER, session: str = "", 
             # from/to 按真实旧新 holder：权威此刻仍在代理手里（controller → 代理），只是「等交回」；不写成已经交回
             B.note_lead_event(CONTROLLER, l.get("holder") or "", l.get("epoch"), "lease_lost",
                               f"真 Leader 回归时租约仍由代理 {l.get('holder')} 持有，已写入交回请求，等待其下一圈释放。")
-            return f"LEASE_HELD_BY {l.get('holder')}（代理 Leader，已通知交回）。稍候再调 bus_console(action=\"wait\")。"
+            return respond(f"LEASE_HELD_BY {l.get('holder')}（代理 Leader，已通知交回）。稍候再调 bus_console(action=\"wait\")。")
         return f"LEASE_HELD_BY {l.get('holder')}。你不是当前Leader，回到 bus_wait_task。"
     if holder == CONTROLLER:
         hb = os.path.join(B.ROOT, "console", "handback.json")
@@ -1655,16 +1671,12 @@ def console_wait(timeout_sec: int, holder: str = CONTROLLER, session: str = "", 
         if cmds:
             # 指令优先返回；提醒作为附注行附在末尾，避免指令密集时饿死
             note = notify_note(cooldown, stale_min)
-            return render_commands(cmds) + (("\n" + note + "\n") if note else "")
+            return respond(render_commands(cmds) + (("\n" + note + "\n") if note else ""))
         note = notify_note(cooldown, stale_min)
         if note:
-            return note
+            return respond(note)
         if time.time() >= end:
-            idle = "IDLE. Call bus_console(action=\"wait\") again."
-            if session:
-                # 会话标识回告：多 Leader 并行时，之后所有 bus_console 调用带同一 session，工作台按会话区分接入者
-                idle += ("\nSESSION=%s（首次分配，之后每次 bus_console 调用都用它）" % session) if assigned else ("\nSESSION=%s" % session)
-            return idle
+            return respond('IDLE. Call bus_console(action="wait") again.')
         time.sleep(B.POLL_SEC)
 
 

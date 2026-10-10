@@ -759,7 +759,7 @@ Object.assign(ACTIONS, {
   },
   // 清理已过期：全员过期且一份没交的任务逐个取消归档；逐条结果汇总，失败的留在列表里
   'clear-expired': async t => {
-    const dead = runningDecisions().filter(d => stallInfo(d).terminal && !progressOf(d).answered);
+    const dead = runningDecisions().filter(d => !d.external_owner && !d.progress?.meta?.external_owner && stallInfo(d).terminal && !progressOf(d).answered);
     if (!dead.length) return toast('没有已过期的任务', 'ok');
     const names = dead.slice(0, 6).map(d => `· ${esc(titleOf(d))}`).join('<br>') + (dead.length > 6 ? `<br>…等 ${dead.length} 个` : '');
     if (!(await confirmDialog({ title: `清理 ${dead.length} 个已过期任务`, body: `这些任务的 Agent 都已过期、一份回答都没交：<br>${names}<br><br>取消后从「进行中」移除并归档，在「任务历史」里还能看到。`, confirmText: `取消 ${dead.length} 个`, danger: true }))) return;

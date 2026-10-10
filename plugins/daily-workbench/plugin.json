@@ -1,0 +1,15 @@
+{
+  "id": "daily-workbench",
+  "name": "每日工作台",
+  "version": "0.1.0",
+  "api": "workbench-plugin/1",
+  "kind": "panel",
+  "description": "每日主线、任务资料与本人审阅。连接独立的个人助理工作台，通过团队队列安排辅助任务并接收成果。",
+  "page": "web/index.html",
+  "proxy": {"port": "port"},
+  "config": {"port": 8790, "project": ""},
+  "config_help": {
+    "port": "本机每日工作台 HTTP 端口；服务和资料由个人助理项目维护。",
+    "project": "每日工作台任务默认所属项目的 slug；留空时在任务面板选择。团队和模式从协作台读取。"
+  }
+}

@@ -89,6 +89,9 @@ def set_review(task_id, teammate, verdict, reviewer, note='', expected_commit=''
             raise ValueError('Unbound commit: builder HEAD equals the task baseline (no change to review); PASS refused')
     with file_mutex(BB.record_path(task_id) + '.mutex'):
         rec = BB.record(task_id)
+        if teammate not in (rec.get('teammates') or {}):
+            # 原来是 KeyError：bus_core.reply 只接 ValueError，审查回答整条丢失（红队清单第 6 项）
+            raise ValueError(f'施工单 {task_id} 里没有成员 {teammate}')
         tm = rec['teammates'][teammate]
         actual = _commit(rec['repo'], tm.get('commit'))
         expected = _commit(rec['repo'], expected_commit)
@@ -182,6 +185,10 @@ def merge(task_id, teammate, by='controller'):
                     return {'ok': False, 'conflicts': conflicts, 'reason': 'Git merge failed; main unchanged'}
                 merged = _git(temporary, 'rev-parse', 'HEAD').strip()
                 changed = [p for p in _git(temporary, 'diff', '--name-only', '-z', before, merged).split('\0') if p]
+                if not changed:
+                    # 红队清单第 2 项：合并没带来任何改动（内容早已在 main）时不能写 merged=True——那是零内容合并。
+                    # 落地推进器会把它归到「已在 main」自动结案
+                    return {'ok': False, 'reason': 'Merge brings no change (content already in main); not marked merged'}
                 overlap = sorted(dirty_paths(repo) & set(changed))
                 if overlap:
                     return {'ok': False, 'conflicts': overlap, 'reason': 'Local changes overlap; main unchanged'}
@@ -198,7 +205,12 @@ def merge(task_id, teammate, by='controller'):
                     hint = rereview_hint(repo, rec.get('base') or before, commit, tm.get('review_main', ''), before)
                 except Exception as e:  # 别删：里面虽都 check=False，_git 的 timeout=180 抛 TimeoutExpired 只有这里接得住（fable2 1b23）
                     hint = {'needed': None, 'message': f'重审判断失败（{type(e).__name__}: {str(e)[:120]}），请人工确认 main 是否在审查后前进'}
-                _git(repo, 'merge', '--ff-only', merged)
+                ff = _git(repo, 'merge', '--ff-only', merged, check=False)
+                if ff.returncode:
+                    # 红队清单第 5 项：快进失败（工作区改动挡住、main 刚前进）原来直接抛异常，记录里不留原因
+                    tm['merge_error'] = (ff.stderr or ff.stdout)[-2000:]
+                    BB.save_record(task_id, rec)
+                    return {'ok': False, 'reason': 'Fast-forward of main failed; main unchanged'}
                 tm.update(merged=True, merge_commit=merged, merged_at=BB.B.now_iso(), merged_by=by, rereview=hint)
                 tm.pop('merge_error', None)
                 # 一单一个结果：任一成员合入即收口，其余成员是同题候选，不再算「在建」（否则记录永远停在 building）

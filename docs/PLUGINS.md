@@ -84,6 +84,27 @@ while True:
 
 读事件时 `cursor=now` 表示"只要从现在起的新事件"，通知类插件首次启动用它，避免补发最近 7 天的历史。
 
+## 来源插件的辅助任务
+
+本人在来源插件中安排的资料整理、分析任务，可以使用通用插件任务接口。来源插件维护原始资料、批注和本人验收，协作台负责项目团队队列、成员领取与回复。
+
+接口沿用可信本机插件的访问边界。`source` 由调用方提供，用于归属和请求去重；身份认证与插件间权限隔离遵循下方安全边界。
+
+| 接口 | 用途 |
+|---|---|
+| `GET /api/plugin-jobs/options?source=…` | 读取可选项目、项目团队与自定义团队、资料协作模式、默认设置和成员状态 |
+| `GET /api/plugin-jobs/agents` | 读取 Agent 名称、模型标识、在线与待命状态；字段不包含凭据 |
+| `POST /api/plugin-jobs` | 传入已启用插件的 `source`、稳定 `request_id`、`project`、`team`、`question`、可选 `mode`、`peers`、`title` 和 `ttl_min`；默认模式为 `race` |
+| `GET /api/plugin-jobs?source=…&request_id=…` | 核对同一次派发；返回 `submitted`、`unknown`、`cancelled` 或 `missing` |
+| `POST /api/plugin-jobs/cancel` | 传入 `source` 与 `request_id`，取消尚无人领取的队列任务；已领取时返回冲突 |
+| `GET /api/task?id=…` | 使用派发得到的任务编号读取进度和原始回复 |
+
+同一请求内容重复提交返回原任务，内容改变返回冲突。`submitted` 表示已投递，成果由来源插件读取后送本人审阅。中断后的请求会按持久化标记寻找原任务，无法确认时保持 `unknown`，不会再创建执行。
+
+成员范围来自协作台项目团队；`peers` 可以指定团队内的子集，省略时取整个团队。成员名单在提交时固定，重复提交保持原任务的范围。抢单由一位成员执行；其他资料模式收集所有选定成员的回复。静态团队可包含离线成员，执行期限从领取时计算。项目任务记录保留来源、团队和模式，返回值提供直接进入任务队列的链接。
+
+普通任务的自动改派、完成合并提醒和自动收尾跳过外部任务。来源插件接收原始回复并负责本人审阅。单一 `peer` 的既有调用协议继续处理已经安排的任务。`plugins/level-design` 提供完整面板示例。
+
 ## 安全边界
 
 - **插件进程拿到的环境变量是白名单**（PATH、TEMP、用户目录、代理等），工作台自己的其它环境变量不会传过去。
@@ -104,3 +125,4 @@ while True:
 |---|---|---|
 | `daily-assistant` | 数据源 | 读个人助理采集的小米待办/笔记、飞书、四象限，把新增未完成条目送进收件箱。见 [plugins/daily-assistant/README.md](../plugins/daily-assistant/README.md) |
 | `desktop-notify` | 通知 | 待拍板、施工落地、收件箱新增、插件崩溃时弹 Windows 通知；合并批量、每小时上限、免打扰时段；默认关闭。见 [plugins/desktop-notify/README.md](../plugins/desktop-notify/README.md) |
+| `level-design` | 面板 | 关卡工作台、指定 Agent 辅助任务与成果回传。见 [plugins/level-design/README.md](../plugins/level-design/README.md) |

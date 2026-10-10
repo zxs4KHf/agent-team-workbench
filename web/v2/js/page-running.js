@@ -4,9 +4,50 @@ import { esc, attr, icon, sparkline, ring, fmtDate, relTime, minutesSince } from
 import { S, F, project, decisions, activeDecisions, isUnbound, UNBOUND_HINT, runningDecisions, doneDecisions, agentList, onlineAgents, agentByName, projectPeers, displayName, titleOf, displayTitle, bucketOf, BUCKETS, threadsOf, childrenOf, artifactsOf, deliveredDecisions, weekDelivered, progressOf, stallInfo, countPending, STATUS, STATUS_TONE, EXEC_LABEL, PEER_STATE, ARTIFACT_KIND, orderedTasks, taskTier } from './model.js';
 
 import { capped, chip, empty, head } from './views.js';
+import { modeLabel } from './views2.js';
+
+export function externalTaskInfo(d, meta = {}) {
+  const owner = String(d?.external_owner || meta.external_owner || '').trim();
+  if (!owner) return null;
+  const team = String(d?.team || meta.team || '').trim();
+  const requestId = String(d?.external_request_id || d?.plugin_request_id || meta.external_request_id || meta.plugin_request_id || '').trim();
+  const link = /^[a-z0-9][a-z0-9-]{1,40}$/.test(owner) ? `/plugins/${owner}/web/index.html` : '';
+  return { owner, team, requestId, link };
+}
+
+function externalTaskStatus(pr) {
+  if (pr.complete && pr.answered) return '成果已回传 · 由来源审阅';
+  const states = Object.values(pr.states);
+  if (pr.answered) return `已有 ${pr.answered} 份回答 · ${states.some(state => state === 'stalled' || state === 'expired' || state === 'missing') ? '其余名额需处理' : '等待其余 Agent'}`;
+  if (states.includes('stalled')) return 'Agent 已领取未回 · 由来源处理';
+  if (states.includes('expired')) return 'Agent 已过期 · 由来源处理';
+  if (states.includes('missing')) return '任务包待核对 · 由来源处理';
+  const winner = pr.meta.race_winner;
+  if (winner) return `由 ${displayName(winner)} 抢得 · 处理中`;
+  const working = Object.entries(pr.states).filter(([, state]) => state === 'working' || state === 'stalled').map(([name]) => displayName(name));
+  if (working.length) return `${working.join('、')} 已领取 · 处理中`;
+  return states.includes('queued') ? '已进入 Agent 队列 · 等待领取' : '任务状态待核对 · 由来源处理';
+}
+
+function externalTaskBadge(pr) {
+  if (pr.complete && pr.answered) return ['成果已回传', 'ok'];
+  const states = Object.values(pr.states);
+  if (states.some(state => state === 'stalled' || state === 'expired' || state === 'missing')) return [pr.answered ? '部分回传 · 待处理' : '需要来源处理', 'warn'];
+  if (pr.answered) return ['部分回答已回传', 'info'];
+  if (states.includes('working') || pr.meta.race_winner) return ['Agent 处理中', 'info'];
+  return states.includes('queued') ? ['等待领取', 'info'] : ['状态待核对', 'warn'];
+}
+
+function taskStall(d, pr = progressOf(d)) {
+  if (!externalTaskInfo(d, pr.meta)) return stallInfo(d);
+  const states = Object.values(pr.states);
+  const terminal = !pr.complete && (!states.length || states.some(state => state === 'stalled' || state === 'expired' || state === 'missing'));
+  return { terminal, tone: terminal ? 'warn' : 'muted', text: externalTaskStatus(pr) };
+}
 
 export function renderRunning(p) {
   const data = runningData(p), { all, list, stalled } = data, stuckOnly = !!F.filters.runningStuck, m = metaOf(data);  // 只算一遍（fable2 0c0f）
+  const regularStalled = stalled.filter(d => !externalTaskInfo(d, progressOf(d).meta));
   // 片上的数 = 符合当前关键词的卡住数，点开看到的就是这么多（fable2 9a21：原来用全部卡住数，关键词无交集时片上 1、列表空）
   const stuckChip = m.showChip ? `<button type="button" class="fchip ${stuckOnly ? 'on' : ''}" data-filter-stuck="toggle" aria-pressed="${stuckOnly ? 'true' : 'false'}"${m.tip ? ` data-tip="${attr(m.tip)}"` : ''}>只看卡住<span class="n" id="stuckN">${m.stuckN}</span></button>` : '';
   // 待审的施工 / 审查单一键全部派审（直接派给在线 Reviewer，不经 Leader）
@@ -14,10 +55,10 @@ export function renderRunning(p) {
   const reviewN = all.filter(d => ['build', 'review'].includes(d.mode || (d.progress && d.progress.meta && d.progress.meta.mode)) && !(stallInfo(d).terminal && !progressOf(d).answered)).length;
   const reviewAll = reviewN ? `<button type="button" class="small primary" data-action="review-all">${icon('send')}全部催审 ${reviewN}</button>` : '';
   // 一键清掉「全员过期、一份没交」的任务（2026-10-02 用户：「没办法把已过期的给清掉」）
-  const deadN = all.filter(d => stallInfo(d).terminal && !progressOf(d).answered).length;
+  const deadN = all.filter(d => !externalTaskInfo(d, progressOf(d).meta) && stallInfo(d).terminal && !progressOf(d).answered).length;
   const clearDead = deadN ? `<button type="button" class="small danger" data-action="clear-expired">${icon('trash')}清理已过期 ${deadN}</button>` : '';
   return `<div class="view">${head('任务队列', '进行中', '每个任务一行，卡住原因写在行上，点开看每个 Agent 的状态。拖动行首 ⋮⋮ 调整处理顺序，前三位标 P0 / P1 / P2。', clearDead + reviewAll)}
-    ${stalled.length ? `<div class="banner" style="background:var(--surface-2)">${icon('info')}<span>${stalled.length} 个任务有名额长期未回：守护会自动改派或摘掉；也可以直接点「现在合并」或「取消」，点完即从这里移除</span></div>` : ''}
+    ${regularStalled.length ? `<div class="banner" style="background:var(--surface-2)">${icon('info')}<span>${regularStalled.length} 个任务有名额长期未回：守护会自动改派或摘掉；也可以直接点「现在合并」或「取消」，点完即从这里移除</span></div>` : ''}
     <section class="card fit-panel" data-key="fit-running"><div class="filters fit-head"><div class="search">${icon('search')}<input type="search" placeholder="搜索标题或任务号…" value="${attr(F.filters.running)}" data-filter="running" aria-label="搜索进行中任务" autocomplete="off"></div>${stuckChip}<span class="result-count" id="runningCount">${m.count}</span></div>
     <div class="fit-body">${list.length ? `<div class="stack" id="taskList">${taskListHtml(p, list)}</div>` : empty(all.length ? (stuckOnly && !F.filters.running.trim() ? '没有卡住的任务' : '没有匹配的任务') : '没有进行中的任务', all.length ? (stuckOnly ? '再点一次「只看卡住」取消筛选' : '换个关键词') : '从「发起」创建一轮独立作答、redteam 或 relay')}</div></section>
   </div>`;
@@ -27,11 +68,11 @@ export function renderRunning(p) {
 export function taskListHtml(p = project(), list = runningList(p)) {
   return capped('running', list, taskRow, 10);   // ADR 0015：长列表一律分页，分页条贴面板底
 }
-// 进行中页的筛选：关键词 + 「只看卡住」（stallInfo.terminal，与概览行动条「卡住的施工」同一口径）
+// 进行中页的筛选：普通任务按时限，外部任务按真实领取状态。
 function kwMatch(d, q = F.filters.running.trim().toLowerCase()) { return !q || titleOf(d).toLowerCase().includes(q) || d.task_id.includes(q); }
-// 不做跨渲染缓存：「卡住」按当前时间算（stallInfo），数据没变也会随时间变化
+// 不做跨渲染缓存：普通任务按当前时间判断，数据没变也会随时间变化。
 function runningData(p) {
-  const all = orderedTasks(runningDecisions(p)), stalled = all.filter(d => stallInfo(d).terminal), stuckSet = new Set(stalled);
+  const all = orderedTasks(runningDecisions(p)), stalled = all.filter(d => taskStall(d).terminal), stuckSet = new Set(stalled);
   const stuckOnly = !!F.filters.runningStuck, list = all.filter(d => kwMatch(d) && (!stuckOnly || stuckSet.has(d)));
   return { all, list, stalled, stuckN: stalled.filter(d => kwMatch(d)).length };
 }
@@ -58,6 +99,7 @@ function taskActions(d, st, pr) {
   const nudge = (S().nudges || {})[d.task_id];
   const nudged = nudge ? `<span class="chip plain" title="已催 Leader ${nudge.count} 次">已催 ${esc(String(nudge.at || '').slice(11, 16))} ×${nudge.count}</span>` : '';
   const b = (action, label, cls = 'small', extra = '') => `<button type="button" class="${cls}" data-action="${action}" data-id="${id}" ${extra}>${label}</button>`;
+  if (externalTaskInfo(d, pr.meta)) return b('open-task', '查看回答', 'small primary');
   const items = [];
   if (d.status === 'ready_for_merge') {
     items.push(b('nudge-merge', '催 Leader 合并', 'small primary'), nudged);
@@ -84,23 +126,26 @@ function taskActions(d, st, pr) {
   return items.filter(Boolean).join('');
 }
 function taskRow(d) {
-  const pr = progressOf(d), open = F.expanded.has(d.task_id), st = stallInfo(d);
+  const pr = progressOf(d), open = F.expanded.has(d.task_id), st = taskStall(d, pr);
+  const external = externalTaskInfo(d, pr.meta);
+  const externalLabel = external ? `来源：${external.owner === 'level-design' ? 'Level Design 插件' : external.owner}${external.team ? ` · Team：${external.team}` : ''} · ${modeLabel(d.mode || pr.meta.mode || 'independent')}` : '';
   const pct = pr.answered / Math.max(1, pr.expected);
   const actions = taskActions(d, st, pr);
+  const externalBadge = external ? externalTaskBadge(pr) : null;
   const tier = taskTier(d.task_id);
   const handle = `<span class="drag-handle task-handle" draggable="true" data-task-drag role="button" tabindex="0" aria-keyshortcuts="ArrowUp ArrowDown" aria-label="拖动或按上下方向键调整「${attr(titleOf(d))}」的处理顺序" title="拖动 / 聚焦后按 ↑↓ 调整处理顺序">⋮⋮</span>`;
   return `<article class="task ${open ? 'open' : ''} ${st.terminal ? 'terminal' : ''}" data-key="${attr(d.task_id)}">
     <div class="task-main" data-action="toggle-task" data-id="${attr(d.task_id)}" role="button" tabindex="0" aria-expanded="${open}">
-      <div class="min0"><h3 class="truncate">${handle}${tier ? `<span class="chip ${tier === 'P0' ? 'violet' : tier === 'P1' ? 'info' : 'plain'} tier ${tier.toLowerCase()}" data-tier="${tier}">${tier}</span>` : ''}${esc(displayTitle(d))}</h3><p class="truncate"><span class="mono">${esc(d.task_id)}</span> · ${esc(d.mode || 'independent')} · <time data-reltime="${attr(pr.meta.created || d.created || '')}">${esc(relTime(pr.meta.created || d.created))}</time> · <span class="${st.tone === 'bad' ? 'faint' : 'muted'}" style="color:var(--${st.tone === 'bad' ? 'danger' : st.tone === 'warn' ? 'warn' : 'muted'})">${esc(st.text)}</span></p></div>
+      <div class="min0"><h3 class="truncate">${handle}${tier ? `<span class="chip ${tier === 'P0' ? 'violet' : tier === 'P1' ? 'info' : 'plain'} tier ${tier.toLowerCase()}" data-tier="${tier}">${tier}</span>` : ''}${esc(displayTitle(d))}</h3><p class="truncate"><span class="mono">${esc(d.task_id)}</span> · ${external ? esc(externalLabel) : esc(d.mode || 'independent')} · <time data-reltime="${attr(pr.meta.created || d.created || '')}">${esc(relTime(pr.meta.created || d.created))}</time> · <span class="${st.tone === 'bad' ? 'faint' : 'muted'}" style="color:var(--${st.tone === 'bad' ? 'danger' : st.tone === 'warn' ? 'warn' : 'muted'})">${esc(st.text)}</span></p></div>
       <div class="mid"><div class="pbar ${pr.answered ? '' : 'indeterminate'}"><i style="transform:scaleX(${pct.toFixed(3)})"></i></div><div class="plabel"><span>${pr.answered}/${pr.expected} 已回答</span><span>法定 ${pr.quorum}</span></div></div>
-      <div class="mid">${pr.complete ? '<span class="chip ok">可合并</span>' : chip(d.status)}</div>
+      <div class="mid">${externalBadge ? `<span class="chip ${externalBadge[1]}">${esc(externalBadge[0])}</span>` : pr.complete ? '<span class="chip ok">可合并</span>' : chip(d.status)}</div>
       <div class="row">${actions}<button type="button" class="ghost icon" data-action="toggle-task" data-id="${attr(d.task_id)}" aria-label="${open ? '收起' : '展开'}" style="transform:rotate(${open ? 90 : 0}deg);transition:transform var(--m-base) var(--ease-out)">${icon('chevron')}</button></div>
     </div>
-    ${open ? `<div class="task-body fade-up"><div><div class="detail-label">任务问题</div><div class="q">${esc(pr.meta.question || d.title || '任务原文尚未返回')}</div><div class="row wrap" style="margin-top:12px"><button type="button" class="small" data-action="open-task" data-id="${attr(d.task_id)}">${icon('eye')}查看回答</button><button type="button" class="small" data-action="open-redispatch" data-id="${attr(d.task_id)}">条件重派…</button><button type="button" class="small" data-action="supersede" data-id="${attr(d.task_id)}">标记被取代</button><button type="button" class="small danger" data-action="cancel-task" data-id="${attr(d.task_id)}">取消</button></div></div>
-      <div><div class="detail-label">Agent 状态</div><div class="peers-state">${(pr.meta.peers || d.peers || []).map(n => agentState(d, n)).join('') || '<span class="muted">尚未登记 Agent</span>'}</div></div></div>` : ''}
+    ${open ? `<div class="task-body fade-up"><div><div class="detail-label">任务问题</div><div class="q">${esc(pr.meta.question || d.title || '任务原文尚未返回')}</div><div class="row wrap"><button type="button" class="small" data-action="open-task" data-id="${attr(d.task_id)}">${icon('eye')}查看回答</button>${external ? (external.link ? `<a class="link" href="${attr(external.link)}">返回来源工作台</a>` : '') : `<button type="button" class="small" data-action="open-redispatch" data-id="${attr(d.task_id)}">条件重派…</button><button type="button" class="small" data-action="supersede" data-id="${attr(d.task_id)}">标记被取代</button><button type="button" class="small danger" data-action="cancel-task" data-id="${attr(d.task_id)}">取消</button>`}</div></div>
+      <div><div class="detail-label">Agent 状态</div><div class="peers-state">${(pr.meta.peers || d.peers || []).map(n => agentState(d, n, !!external)).join('') || '<span class="muted">尚未登记 Agent</span>'}</div></div></div>` : ''}
   </article>`;
 }
-function agentState(d, name) {
+function agentState(d, name, external = false) {
   // 按这个人接手 / 进它收件箱的时间算（后端 task_progress.ages）；没有时才退回任务创建时间。以前一律按任务创建时间，改派后新人一接手就显示「已领 1500 分钟」
   const pr = progressOf(d), state = pr.states[name] || 'missing', sec = (pr.ages || {})[name];
   const age = Math.max(1, sec != null ? Math.floor(sec / 60) : minutesSince(pr.meta.created || d.created));
@@ -108,7 +153,7 @@ function agentState(d, name) {
   let label = PEER_STATE[state] || state;
   if (state === 'working') label = `已领取 ${age} 分钟`; if (state === 'stalled') label = `已领取 ${age} 分钟未回`;
   if (state === 'queued' && sec != null) label = `排队 ${age} 分钟`;
-  const ag = agentByName(name); const retry = state === 'stalled' || state === 'expired' || state === 'missing' || (state === 'queued' && !ag.online) ? `<button type="button" class="ghost small" data-action="requeue-agent" data-id="${attr(d.task_id)}" data-peer="${attr(name)}">${state === 'expired' || state === 'missing' || !ag.online ? '改派' : '退回改派'}</button>` : '';
+  const ag = agentByName(name); const retry = !external && (state === 'stalled' || state === 'expired' || state === 'missing' || (state === 'queued' && !ag.online)) ? `<button type="button" class="ghost small" data-action="requeue-agent" data-id="${attr(d.task_id)}" data-peer="${attr(name)}">${state === 'expired' || state === 'missing' || !ag.online ? '改派' : '退回改派'}</button>` : '';
   return `<div class="pstate ${state}"><span class="dot"></span><span class="who truncate">${esc(displayName(name))}</span><span class="st">${esc(label)}${offline ? ' · 派发时离线' : ''}</span>${retry}</div>`;
 }
 

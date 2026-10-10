@@ -184,6 +184,8 @@ def deadline_passed(rec) -> bool:
     有 deadline_ts（epoch 秒，与时区无关）就只看它；没有的旧任务退回原来的字符串比较。"""
     rec = rec if isinstance(rec, dict) else {}
     ts = rec.get("deadline_ts")
+    if rec.get("queue_until_claim") and ts == 0 and not rec.get("taken_at"):
+        return False  # 外部队列尚无人领取，执行期限从领取时开始
     if isinstance(ts, (int, float)) and not isinstance(ts, bool):
         return time.time() > ts
     d = parse_ts(rec.get("deadline"))
@@ -676,12 +678,16 @@ def auto_pick(exclude=(), max_peers: int = AUTO_MAX_PEERS) -> dict:
             "max_peers": n, "reasons": skipped}
 
 
-def dispatch(from_peer: str, peers: list, mode: str, question: str, context_files: list, ttl_min: int = 30, angles=None, min_answers: int = 0, repo_dir: str = "", review_of=None, parent_task: str = "", intro: str = "", *, max_peers: int = 0, race: bool = False) -> dict:
+def dispatch(from_peer: str, peers: list, mode: str, question: str, context_files: list, ttl_min: int = 30, angles=None, min_answers: int = 0, repo_dir: str = "", review_of=None, parent_task: str = "", intro: str = "", *, max_peers: int = 0, race: bool = False, substitute: bool = True, external_owner: str = "", queue_until_claim: bool = False, project: str = "", team: str = "", plugin_request_id: str = "", task_id_override: str = "") -> dict:
     ensure_dirs()
     if mode not in MODES:
         raise ValueError(f"mode 只能是 {', '.join(MODES)}")
     if not question or not question.strip():
         raise ValueError("question 不能为空")
+    if external_owner and not queue_until_claim and (mode != "independent" or substitute or len(peers or []) != 1):
+        raise ValueError("外部任务只能点名一个 Agent，且不能自动替换")
+    if queue_until_claim and (not external_owner or substitute or not peers or mode in ("build", "review")):
+        raise ValueError("外部队列参数不合法")
     # 兼容式校验：不是 task_id 形状就当没传，不报错——老调用方不传、网页可能传别的串，
     # 派发不该因为一个纯展示用的字段整单失败。
     parent_task = str(parent_task or "").strip()
@@ -693,6 +699,8 @@ def dispatch(from_peer: str, peers: list, mode: str, question: str, context_file
     # 同一列表里显式点名的 peer 仍然照发（不因来了 auto 就消失），auto 只补选空闲的。
     auto = None
     peers = list(peers or [])
+    if external_owner and (peers[0] in ("controller", "auto") or (not queue_until_claim and not peer_state(peers[0]).get("listening"))):
+        raise ValueError("被点名的 Agent 当前未在监听")
     if any(str(p).strip().lower() == AUTO_TOKEN for p in peers):
         named = [p for p in peers if str(p).strip().lower() != AUTO_TOKEN]
         auto = auto_pick(exclude=[from_peer] + named, max_peers=max_peers)
@@ -701,14 +709,14 @@ def dispatch(from_peer: str, peers: list, mode: str, question: str, context_file
                              + json.dumps(auto["reasons"], ensure_ascii=False))
         peers = list(dict.fromkeys(named + auto["picked"]))
     context = resolve_context(context_files)
-    task_id = new_task_id()
+    task_id = task_id_override or new_task_id()
     build_rec = None
     if mode == "build":
         import bus_build as BB
-        swaps_pre = substitute_offline(list(peers))
+        swaps_pre = substitute_offline(list(peers)) if substitute else {}
         builders = [swaps_pre.get(p, p) for p in peers]
         build_rec = BB.open_worktrees(task_id, builders, repo_dir or WORKSPACE)
-    deadline, deadline_ts = deadline_after(ttl_min)
+    deadline, deadline_ts = ("", 0) if queue_until_claim else deadline_after(ttl_min)
     offline = []
     # angles：dict 指定每个 peer 的切入角度；True 则按 ANGLES 轮流分配；None 不分配
     if angles is True:
@@ -717,17 +725,24 @@ def dispatch(from_peer: str, peers: list, mode: str, question: str, context_file
     author = (review_of or {}).get("teammate") if isinstance(review_of, dict) else None
     if author and author in peers:
         raise ValueError(f"{author} 是被审提交的作者，不能审自己的代码；换一位 Reviewer")
-    swaps = substitute_offline(list(peers), exclude={author} if author else None)
+    swaps = substitute_offline(list(peers), exclude={author} if author else None) if substitute else {}
     if swaps:
         peers = [swaps.get(p, p) for p in peers]
         angles = {swaps.get(k, k): v for k, v in angles.items()}
     for peer in peers:
         valid_name(peer)
         st = peer_state(peer)
+        if external_owner and not queue_until_claim and not st.get("listening"):
+            raise ValueError("被点名的 Agent 当前未在监听")
         if not st["online"]:
             offline.append(peer)
         task = {"id": task_id, "from": from_peer, "to": peer, "mode": mode, "question": question, "angle": angles.get(peer, ""),
                 "context": context, "created": now_iso(), "deadline": deadline, "deadline_ts": deadline_ts}
+        if external_owner:
+            task["external_owner"] = external_owner
+        if queue_until_claim:
+            task.update(queue_until_claim=True, queue_ttl_min=ttl_min, project=project, team=team,
+                        plugin_request_id=plugin_request_id)
         if race:
             task["race"] = True   # 抢单：谁先领谁做，领到的瞬间撤掉其他人的副本（_race_claim）
         if parent_task:
@@ -754,6 +769,12 @@ def dispatch(from_peer: str, peers: list, mode: str, question: str, context_file
     min_answers = min(min_answers, len(expected))
     meta = {"id": task_id, "from": from_peer, "peers": list(peers), "offline_at_dispatch": offline, "mode": mode, "question": question, "angles": angles,
             "min_answers": min_answers, "context_files": list(context_files or []), "created": now_iso(), "deadline": deadline, "deadline_ts": deadline_ts, "substituted": swaps}
+    if external_owner:
+        meta["external_owner"] = external_owner
+    if queue_until_claim:
+        meta.update(queue_until_claim=True, queue_ttl_min=ttl_min, project=project, team=team,
+                    plugin_request_id=plugin_request_id)
+        meta["min_answers"] = len(peers)
     if race:
         meta["race"] = True
         meta["min_answers"] = 1
@@ -805,7 +826,10 @@ def reclaim_claims(peer: str) -> tuple:
         if not isinstance(meta, dict) or peer not in (meta.get("peers") or []) \
                 or os.path.exists(os.path.join(OUTBOX, f"{task_id}.{peer}.md")):
             continue
-        spent = int(task.get("redelivered") or 0) >= REDELIVER_MAX
+        if task.get("queue_until_claim"):
+            if not deadline_passed(task):
+                continue
+        spent = bool(task.get("queue_until_claim")) or int(task.get("redelivered") or 0) >= REDELIVER_MAX
         if not spent and not deadline_passed(task):
             if redeliver is None:
                 redeliver = (path, task)
@@ -847,6 +871,42 @@ def _race_claim(task_id: str, peer: str) -> bool:
     return True
 
 
+def _external_queue_claim(task_id: str, peer: str) -> dict:
+    """在任务级锁内核对、确定抢单胜者并完成领取。"""
+    from bus_locks import file_mutex
+    meta_path = os.path.join(OUTBOX, f"{task_id}.meta.json")
+    src = os.path.join(INBOX, peer, f"{task_id}.json")
+    with file_mutex(meta_path + ".race.mutex"):
+        meta = read_json(meta_path, None)
+        if not isinstance(meta, dict) or not meta.get("queue_until_claim") or meta.get("cancelled") or meta.get("sealed"):
+            return {}
+        if peer not in meta.get("peers", []) or not os.path.isfile(src):
+            return {}
+        winner = meta.get("race_winner")
+        if meta.get("race") and winner and winner != peer:
+            os.replace(src, src + RACE_LOST)
+            return {}
+        task = read_json(src, None)
+        if not isinstance(task, dict) or task.get("id") != task_id:
+            return {}
+        if meta.get("race") and not winner:
+            others = [p for p in meta["peers"] if p != peer]
+            meta.update(race_winner=peer, race_at=now_iso(), race_withdrawn=others, peers=[peer], min_answers=1)
+            _save_meta(meta)
+            for other in others:
+                other_src = os.path.join(INBOX, other, f"{task_id}.json")
+                if os.path.isfile(other_src):
+                    os.replace(other_src, other_src + RACE_LOST)
+        task["deadline"], task["deadline_ts"] = deadline_after(task.get("queue_ttl_min") or meta.get("queue_ttl_min") or 30)
+        task["taken_at"] = now_iso()
+        write_json(src, task)
+        os.replace(src, os.path.join(INBOX, peer, f"{task_id}.taken"))
+        if not meta.get("deadline_ts") or task["deadline_ts"] > meta["deadline_ts"]:
+            meta["deadline"], meta["deadline_ts"] = task["deadline"], task["deadline_ts"]
+            _save_meta(meta)
+        return task
+
+
 def wait_task(peer: str, timeout_sec: int, model: str = "") -> str:
     # 阻塞轮询，任务到达 2 秒内返回；超时返回固定 IDLE 文本
     valid_name(peer)
@@ -873,6 +933,12 @@ def wait_task(peer: str, timeout_sec: int, model: str = "") -> str:
         for f in files:
             task = read_json(os.path.join(inbox, f), None)
             if not task:
+                continue
+            if task.get("queue_until_claim"):
+                claimed = _external_queue_claim(task["id"], peer)
+                if claimed:
+                    heartbeat(peer, "busy", model, claimed["id"])
+                    return render_task(claimed)
                 continue
             if deadline_passed(task):
                 os.replace(os.path.join(inbox, f), os.path.join(inbox, f + ".expired"))
@@ -1817,11 +1883,13 @@ def lead_events_open() -> list:
 
 
 def suggest_timeout() -> int:
-    # 最近 10 分钟有派发 → 30 秒短等待；否则 300 秒长等待。空闲期 token 不变，活跃期领取延迟压到半分钟内
+    # 普通协作任务沿用活跃期短等待；插件任务保持其它 Agent 的空闲等待周期。
     # 字符串比较会在时区变化后错几小时（ADR 0010）：一律解析后比
     for f in os.listdir(OUTBOX):
         if f.endswith(".meta.json"):
             m = read_json(os.path.join(OUTBOX, f), {})
+            if m.get("external_owner"):
+                continue
             a = age_sec(m.get("created"))
             if a is not None and a <= 600:
                 return 30
@@ -2152,7 +2220,7 @@ def auto_seal(grace_sec: int = 600) -> list:
         if not f.endswith(".meta.json"):
             continue
         meta = read_json(os.path.join(OUTBOX, f), None)
-        if not meta or meta.get("sealed") or meta.get("mode") in ("build", "review"):
+        if not meta or meta.get("external_owner") or meta.get("sealed") or meta.get("mode") in ("build", "review"):
             continue
         tid = meta["id"]
         answered = [p for p in meta["peers"] if os.path.exists(os.path.join(OUTBOX, f"{tid}.{p}.md"))]
@@ -2241,7 +2309,7 @@ def auto_reassign(max_per_peer: int = AUTO_REASSIGN_MAX) -> list:
         if not f.endswith(".meta.json"):
             continue
         meta = read_json(os.path.join(OUTBOX, f), None)
-        if not meta or meta.get("mode") in ("build", "review"):
+        if not meta or meta.get("external_owner") or meta.get("mode") in ("build", "review"):
             continue
         task_id = meta["id"]
         for peer in list(meta["peers"]):
@@ -2287,7 +2355,7 @@ def close_stale(hours: int) -> list:
         if not f.endswith(".meta.json"):
             continue
         meta = read_json(os.path.join(OUTBOX, f), None)
-        if not meta or meta.get("mode") in ("build", "review"):
+        if not meta or meta.get("external_owner") or meta.get("mode") in ("build", "review"):
             continue
         created_age = age_sec(meta.get("created"))
         if not deadline_passed(meta) or created_age is None or created_age < hours * 3600:

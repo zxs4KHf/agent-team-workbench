@@ -26,6 +26,7 @@ import bus_review as RV  # noqa: E402  立即派审查（催审 / 全部催审�
 import bus_reassign as RA  # noqa: E402  一键改派被占着不动的任务
 import bus_history as HIST  # noqa: E402  任务历史只读分页（3847）
 import bus_plugins as PL  # noqa: E402  插件管理（docs/PLUGINS.md）
+import bus_plugin_jobs as PJ  # noqa: E402  插件任务派发
 import bus_wake as WK  # noqa: E402  唤醒掉线的 Agent
 from urllib.parse import unquote as _unquote  # noqa: E402
 
@@ -497,6 +498,18 @@ class Handler(BaseHTTPRequestHandler):
                                        "plugins": {"running": sum(1 for p in PL.discover() if p["running"])}})
             if u.path == "/api/plugins":
                 return self.send_json({"plugins": PL.discover()})
+            if u.path == "/api/plugin-jobs/agents":
+                return self.send_json(PJ.agents())
+            if u.path == "/api/plugin-jobs/options":
+                try:
+                    return self.send_json(PJ.options(q.get("source"), PL.discover()))
+                except PJ.JobError as exc:
+                    return self.send_json({"error": str(exc)}, exc.status)
+            if u.path == "/api/plugin-jobs":
+                try:
+                    return self.send_json(PJ.lookup(q.get("source"), q.get("request_id")))
+                except PJ.JobError as exc:
+                    return self.send_json({"error": str(exc)}, exc.status)
             if u.path == "/api/plugins/log":
                 return self.send_json({"log": PL.log_tail(q.get("id", ""))})
             if u.path == "/api/intake":
@@ -680,6 +693,16 @@ class Handler(BaseHTTPRequestHandler):
                 return self.handle_upload()
             body = self.read_body()
             # ---- 扩展层（收件箱 / 体验反馈 / 插件），见 docs/PLUGINS.md ----
+            if u.path == "/api/plugin-jobs":
+                try:
+                    return self.send_json(PJ.submit(body, PL.discover()))
+                except PJ.JobError as exc:
+                    return self.send_json({"error": str(exc)}, exc.status)
+            if u.path == "/api/plugin-jobs/cancel":
+                try:
+                    return self.send_json(PJ.cancel(body, PL.discover()))
+                except PJ.JobError as exc:
+                    return self.send_json({"error": str(exc)}, exc.status)
             if u.path == "/api/wake/send":
                 # 唤醒：先问声明了 wake 的插件能不能直接发进会话；都不能就把唤醒语还给前端复制
                 if self.client_address[0] not in ("127.0.0.1", "::1"):

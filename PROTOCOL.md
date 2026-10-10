@@ -5,11 +5,10 @@
 ## 目录
 
 ```
-workbench/bus/
+<仓库根目录>/
   bus_core.py        协议实现（dispatch / wait / reply / collect / status / archive）
   bus_tool.py        Bridge 自定义工具入口（stdin 读 JSON 参数）
   tool.js            Bridge 侧启动器：node → py -3 bus_tool.py
-  bus_daemon.py      API peer 常驻进程（DeepSeek / GLM 等）
   bus_cli.py         本地 CLI Agent 适配器
   bus_mcp.py         自建 Streamable HTTP MCP 服务（0.0.0.0:8791/mcp，Bearer 鉴权）：六个 bus_* 工具经子进程复用 bus_tool.py，另含受限 ws_read / ws_write / ws_run；start_mcp.bat 一键启动
   PEER-PROMPT.md     给网页 peer 窗口的待命提示词
@@ -63,8 +62,7 @@ Bridge 不做鉴权（用户定夺，2026-09-20）。控制手段是操作纪律
 | harness | 方式 |
 |---|---|
 | Arena 等网页 Agent | 贴 Bridge URL + `PEER-PROMPT.md` |
-| Claude Code / Codex CLI | `py -3 workbench/bus/bus_cli.py wait --peer codex --model <名>`，回复 `bus_cli.py reply --peer codex --task <id> --file answer.md` |
-| API 模型 | `py -3 workbench/bus/bus_daemon.py --peers ark-deepseek,ark-glm`（默认只用 Coding Plan；按量接口需加 `--allow-paid`），profile 来自 `workbench/config.toml` |
+| Claude Code / Codex CLI | `py -3 bus_cli.py wait --peer codex --model <名>`，回复 `bus_cli.py reply --peer codex --task <id> --file answer.md` |
 
 ## 成本
 

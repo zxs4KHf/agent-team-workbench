@@ -1,0 +1,15 @@
+{
+  "id": "level-design",
+  "name": "Level Design Workbench",
+  "version": "1.1.0",
+  "api": "workbench-plugin/1",
+  "kind": "panel",
+  "description": "关卡资料、设计任务与本人审阅。资料任务进入项目团队队列，支持抢单与资料协作模式，成果自动回到关卡工作台。",
+  "page": "web/index.html",
+  "proxy": {"port": "port"},
+  "config": {"port": 8766, "project": ""},
+  "config_help": {
+    "port": "本机 Level Design Workbench HTTP 端口；关卡服务使用自己的项目目录和数据。",
+    "project": "关卡任务默认所属项目的 slug；留空时在任务面板选择。团队和模式从协作台读取。"
+  }
+}

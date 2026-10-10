@@ -32,9 +32,10 @@ TESTS = os.path.join(ROOT, "tests")
 def collect(pattern: str, fast: bool) -> list:
     out = []
     for f in sorted(os.listdir(TESTS)):
-        if f.startswith("test_") and f.endswith(".py") or f.startswith("smoke_") and f.endswith(".mjs") \
+        # test_*.mjs 原来不在收集范围：2026-10-08 加的 test_plugin_team_queue_ui 与 a952 的 test_arena_join_ui 从没被跑过
+        if f.startswith("test_") and f.endswith((".py", ".mjs")) or f.startswith("smoke_") and f.endswith(".mjs") \
                 or f.startswith("ui_") and f.endswith(".py"):
-            if fast and f.startswith("ui_"):
+            if fast and is_browser(f):   # --fast 跳过所有要启动浏览器的测试（CI 只跑确定性的部分）
                 continue
             if pattern and pattern not in f:
                 continue

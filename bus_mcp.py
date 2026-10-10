@@ -223,7 +223,7 @@ async def bus_build(action: str, task_id: str, teammate: str = "", reviewers: li
 
 @mcp.tool(name="bus_collect", description=(
     "Leader工具。阻塞等待 task_id 的全部 peer 回答到齐（每 2 秒检查），最长 timeout_sec 秒；返回所有已到的回答全文与未回复 peer 的在线状态。"
-    "回答到齐后由Leader按 共识/分歧/最终方案/验证依据 四段合并，合并稿写入 workbench/bus/log/<日期>/<task_id>.merge.md，然后调用 bus_status 并传 archive=task_id 归档。"))
+    "回答到齐后由Leader按 共识/分歧/最终方案/验证依据 四段合并，合并稿写入 log/<YYYY-MM-DD>/<task_id>.merge.md（不加任何前缀），然后调用 bus_status 并传 archive=task_id 归档。"))
 async def bus_collect(task_id: str, timeout_sec: int = MAX_WAIT) -> str:
     t = _clamp(timeout_sec)
     return await _tool("collect", {"task_id": task_id, "timeout_sec": t}, t)

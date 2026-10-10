@@ -17,7 +17,9 @@
 
 ## 5 分钟上手
 
-**需要：** Windows 10/11、Python 3.11+（`py -3`）、Git。跑测试另需 Node.js 与 Playwright（可选）。
+**需要：** Windows 10/11、Python 3.11+（`py -3`）、Git。跑测试另需 Node.js 20+，浏览器测试另需 Playwright（见 [CONTRIBUTING.md](CONTRIBUTING.md)）。
+
+> 目前只支持 Windows：服务守护、子进程作业对象和启动脚本都是 Windows 专用，macOS / Linux 还跑不起来（欢迎一起补）。
 
 ```powershell
 git clone https://github.com/zxs4KHf/agent-team-workbench.git
@@ -41,7 +43,7 @@ start_all.bat
 | 看进行中的任务、拍板合并结果 | 左侧 **进行中 / 决策** |
 | 让 Agent 动手改代码 | 在决策上点「采纳」，进入「已采纳，等待落地」后派施工：每人一个 git 工作副本，互审通过才合入 |
 | Agent 掉线了 | **Agent → 唤醒掉线的 N 个**：复制唤醒语粘贴到它的对话里 |
-| 接外部数据源或通知渠道 | 顶栏 **扩展与来源 → 插件**（写法见 [docs/PLUGINS.md](docs/PLUGINS.md)） |
+| 接外部数据源或通知渠道 | 顶栏 **扩展与来源 → 插件**（写法见 [docs/PLUGINS.md](docs/PLUGINS.md)）。自带的 Arena、每日工作台、关卡设计插件都默认关闭，各自需要本机另起的服务，没有就不用开 |
 | 用着不顺手 | 任意页面右下角 **反馈**（Alt+B）：本机留一份，也可以一键发成 GitHub Issue |
 
 ## 代码地图
@@ -85,7 +87,7 @@ start_all.bat
 |---|---|
 | `bus_guard.py` | 服务守护：巡检、连续失败自动拉起、网页一键重启 |
 | `bus_settings.py` | 设置页读写 |
-| `lead_keepalive.py` · `controller_activity.py` · `bus_daemon.py` | Leader 保活与活动脉冲 |
+| `lead_keepalive.py` · `controller_activity.py` | Leader 保活与活动脉冲 |
 | `start_*.bat` · `start_workbench_hidden.vbs` | Windows 启动脚本 |
 | `tools/` | 发布校验、代理自检、角色表模板 `roles.json`（本机实例在 `console/roles.json`，缺失时自动回退到模板） |
 | `scripts/run_tests.py` | 一键跑全部测试 |
@@ -106,6 +108,8 @@ start_all.bat
 
 ## 怎么改这个项目
 
+想一起开发先看 [CONTRIBUTING.md](CONTRIBUTING.md)：环境、分支、测试、PR 的全部规矩都在里面。每个 PR 会在 GitHub Actions 上跑一遍确定性测试（Windows）。
+
 **所有改动都走：开分支 → 独立工作副本 → 测试 → 另一个 Agent 审查（绑定提交号）→ 合入 main → 记录改了什么、怎么回滚。** 详见 [docs/WORKFLOW.md](docs/WORKFLOW.md)；给 AI Agent 的速查在 [AGENTS.md](AGENTS.md)。
 
 ```powershell
@@ -120,6 +124,7 @@ py -3 scripts/run_tests.py --fast     # 跳过浏览器测试
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | 分层、数据流、模块边界、依赖规则 |
 | [docs/ROADMAP.md](docs/ROADMAP.md) | 接下来做什么 |
 | [docs/WORKFLOW.md](docs/WORKFLOW.md) | 分支、审查、合并、版本规范 |
+| [视频证据分析方法](docs/methods/video-analysis.md) | 逐字稿、关键帧、时间对照、证据引用与成果回传；方法版本 1.0，各宿主独立维护 |
 | [docs/PLUGINS.md](docs/PLUGINS.md) | 怎么写一个插件 |
 | [docs/ARENA-DEPENDENCIES.md](docs/ARENA-DEPENDENCIES.md) | 外部组件 ArenaX 的依赖图：哪里耦合、换掉要改哪里 |
 | [docs/adr/](docs/adr/) | 重要决定的来龙去脉（为什么这么做、放弃了什么） |

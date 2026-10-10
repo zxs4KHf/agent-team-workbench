@@ -90,7 +90,11 @@ test('刷新恢复：jobs 接口返回的持久 join 作业直接进入 A.jobs �
   assert.equal(A.joinConfig.max_concurrency, 1);
   const html = renderArenaGroups();
   assert.match(html, /等待 Agent 心跳/);
-  assert.match(html, /arena-join-cancel/);        // 在途可取消
+  // 4582（用户 2026-10-02 决定）：等心跳时消息已发进会话，撤不回——取消按钮置灰并说明，不再可点
+  assert.doesNotMatch(html, /arena-join-cancel/);
+  assert.match(html, /disabled title="消息已经发进会话，撤不回/);
+  A.jobs = [job({ status: 'queued' })];
+  assert.match(renderArenaGroups(), /arena-join-cancel/);   // 只有排队中的可取消
   assert.match(html, /接入常用组 \(1\)/);           // 常用组只数 common:true 的
   assert.match(html, /★ 常用/);
   assert.match(html, /☆ 设为常用/);

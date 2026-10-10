@@ -31,7 +31,7 @@ def _held_by(peer: str) -> list:
         else:
             continue
         meta = B.read_json(os.path.join(B.OUTBOX, f"{tid}.meta.json"), None)
-        if not isinstance(meta, dict) or peer not in (meta.get("peers") or []):
+        if not isinstance(meta, dict) or meta.get("external_owner") or peer not in (meta.get("peers") or []):
             continue
         if os.path.exists(os.path.join(B.OUTBOX, f"{tid}.{peer}.md")):
             continue

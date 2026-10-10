@@ -1,0 +1,9 @@
+body { margin: 0; min-height: 100vh; display: flex; flex-direction: column; color: var(--text); background: var(--bg); }
+.plugin-header { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-4); padding: var(--sp-3) var(--sp-5); border-bottom: 1px solid var(--line); background: var(--surface); }
+.plugin-header strong { font-size: var(--fs-2); }
+#connection { flex: 1; color: var(--muted); font-size: var(--fs-1); }
+#daily-workbench { width: 100%; flex: 1; min-height: calc(100vh - var(--topbar-h)); border: 0; }
+#connection-error { padding: var(--sp-6); overflow-wrap: anywhere; }
+#connection-error h1 { font-size: var(--fs-4); }
+#connection-error p { margin: var(--sp-4) 0; color: var(--muted); }
+[hidden] { display: none !important; }

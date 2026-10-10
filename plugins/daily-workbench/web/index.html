@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>每日工作台 · Agent 协作台</title>
+  <script src="/v2/js/boot.js"></script>
+  <link rel="stylesheet" href="/v2/styles/tokens.css">
+  <link rel="stylesheet" href="/v2/styles/base.css">
+  <link rel="stylesheet" href="/v2/styles/components.css">
+  <link rel="stylesheet" href="panel.css">
+  <script src="panel.js" defer></script>
+</head>
+<body>
+  <header class="plugin-header">
+    <a href="/">返回 Agent 协作台</a>
+    <strong>每日工作台</strong>
+    <span id="connection" role="status">正在连接每日工作台…</span>
+    <a id="standalone" target="_blank" rel="noopener noreferrer" hidden>独立打开</a>
+  </header>
+  <section id="connection-error" hidden role="alert" aria-labelledby="error-title">
+    <h1 id="error-title">每日工作台暂时无法连接</h1>
+    <p id="error-detail"></p>
+    <p>启动个人助理中的每日工作台服务后，重新连接。</p>
+    <div class="row wrap">
+      <button id="retry" type="button">重新连接</button>
+      <a href="/v2/hub.html#plugins">查看插件配置</a>
+    </div>
+  </section>
+  <iframe id="daily-workbench" title="每日工作台" hidden referrerpolicy="no-referrer" sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox allow-downloads"></iframe>
+</body>
+</html>
