@@ -1,0 +1,63 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="270" viewBox="0 0 1200 270" role="img" aria-labelledby="title desc">
+  <title id="title">一个问题从提出到合入主线的七步</title>
+  <desc id="desc">提问（你）、分头回答（多个 Agent）、合并（Leader）、拍板（你）、施工（施工 Agent 各自分支）、互审（非作者审查）、合入 main（自动）。只有提问和拍板需要你，其余自动推进。</desc>
+
+  <rect width="1200" height="270" rx="24" fill="#f4f5f2"/>
+
+  <g font-family="PingFang SC, Microsoft YaHei UI, Segoe UI, -apple-system, BlinkMacSystemFont, sans-serif">
+    <!-- 图例 -->
+    <circle cx="74" cy="50" r="8" fill="#956022"/>
+    <text x="92" y="57" font-size="20" fill="#1c241f">需要你：提问、拍板</text>
+    <circle cx="324" cy="50" r="8" fill="#28664b"/>
+    <text x="342" y="57" font-size="20" fill="#1c241f">其余它们自己推进；Agent 掉线可一键唤醒</text>
+
+    <!-- 主线 -->
+    <path d="M140 132 H1060" stroke="#c0cbc1" stroke-width="2"/>
+
+    <g id="steps" text-anchor="middle">
+      <!-- 每一步：编号 / 圆点 / 名称 / 谁来做。列中心 x = 140 + 153.3 × i -->
+      <g transform="translate(140 0)">
+        <text y="104" font-family="SFMono-Regular, Cascadia Code, Consolas, ui-monospace, monospace" font-size="18" fill="#956022">01</text>
+        <circle cy="132" r="14" fill="#956022"/>
+        <text y="186" font-size="24" font-weight="700" fill="#1c241f">提问</text>
+        <text y="218" font-size="18" fill="#956022">你</text>
+      </g>
+      <g transform="translate(293 0)">
+        <text y="104" font-family="SFMono-Regular, Cascadia Code, Consolas, ui-monospace, monospace" font-size="18" fill="#57625b">02</text>
+        <circle cy="132" r="14" fill="#28664b"/>
+        <text y="186" font-size="24" font-weight="700" fill="#1c241f">分头回答</text>
+        <text y="218" font-size="18" fill="#57625b">多个 Agent</text>
+      </g>
+      <g transform="translate(447 0)">
+        <text y="104" font-family="SFMono-Regular, Cascadia Code, Consolas, ui-monospace, monospace" font-size="18" fill="#57625b">03</text>
+        <circle cy="132" r="14" fill="#28664b"/>
+        <text y="186" font-size="24" font-weight="700" fill="#1c241f">合并</text>
+        <text y="218" font-size="18" fill="#57625b">Leader</text>
+      </g>
+      <g transform="translate(600 0)">
+        <text y="104" font-family="SFMono-Regular, Cascadia Code, Consolas, ui-monospace, monospace" font-size="18" fill="#956022">04</text>
+        <circle cy="132" r="14" fill="#956022"/>
+        <text y="186" font-size="24" font-weight="700" fill="#1c241f">拍板</text>
+        <text y="218" font-size="18" fill="#956022">你</text>
+      </g>
+      <g transform="translate(753 0)">
+        <text y="104" font-family="SFMono-Regular, Cascadia Code, Consolas, ui-monospace, monospace" font-size="18" fill="#57625b">05</text>
+        <circle cy="132" r="14" fill="#28664b"/>
+        <text y="186" font-size="24" font-weight="700" fill="#1c241f">施工</text>
+        <text y="218" font-size="18" fill="#57625b">各自 git 分支</text>
+      </g>
+      <g transform="translate(907 0)">
+        <text y="104" font-family="SFMono-Regular, Cascadia Code, Consolas, ui-monospace, monospace" font-size="18" fill="#57625b">06</text>
+        <circle cy="132" r="14" fill="#28664b"/>
+        <text y="186" font-size="24" font-weight="700" fill="#1c241f">互审</text>
+        <text y="218" font-size="18" fill="#57625b">作者不审自己</text>
+      </g>
+      <g transform="translate(1060 0)">
+        <text y="104" font-family="SFMono-Regular, Cascadia Code, Consolas, ui-monospace, monospace" font-size="18" fill="#57625b">07</text>
+        <circle cy="132" r="14" fill="#28664b"/>
+        <text y="186" font-size="24" font-weight="700" fill="#1c241f">合入 main</text>
+        <text y="218" font-size="18" fill="#57625b">自动合并</text>
+      </g>
+    </g>
+  </g>
+</svg>
