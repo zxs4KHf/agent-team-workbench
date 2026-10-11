@@ -146,8 +146,14 @@ export function renderOverview(p) {
   const delivered = deliveredDecisions('project').slice(0, 3);
   // 行动条（ROADMAP「首页下一步」）：跨页面的待办计数，一键直达。收件箱 / 反馈属扩展层：S().ext 由 hub_badge.js 广播，扩展关闭或接口失败时为 null，这两项直接不显示
   const ext = S().ext, stuck = running.filter(d => stallInfo(d).terminal);
+  // 「待拍板」= 等你采纳的合并稿 + 等你回答的选择题（同一条决策不重复计）。原来只数前者：选择题挂在一张待核验的合并稿上时，
+  // 顶部显示「0 待拍板 · ✓ 都处理完了」，下面面板却是「等你拍板 1」（2026-10-10 README 截图里发现）
+  const asks = pendingDecisionItems(p).filter(x => !x.it.decided && !x.it.answer);
+  const askIds = new Set(asks.map(x => x.d.task_id));
+  const toDecide = asks.length + userWait.filter(d => !askIds.has(d.task_id)).length;
   const nb = [
-    { n: userWait.length, label: '待拍板', tone: 'violet', attrs: userWait.length === 1 ? `data-action="open-decision" data-id="${attr(userWait[0].task_id)}"` : 'data-action="goto-status" data-view="decisions" data-status="merged"' },
+    { n: toDecide, label: '待拍板', tone: 'violet', attrs: asks.length ? 'data-action="ov-tab" data-tab="decide" data-group="main"'
+      : userWait.length === 1 ? `data-action="open-decision" data-id="${attr(userWait[0].task_id)}"` : 'data-action="goto-status" data-view="decisions" data-status="merged"' },
     ext && ext.inbox != null && { n: ext.inbox, label: '收件箱', tone: 'info', href: '/hub#inbox' },
     ext && ext.feedback != null && { n: ext.feedback, label: '未处理反馈', tone: 'warn', href: '/hub#feedback' },
     { n: stuck.length, label: '卡住的施工', tone: 'danger', attrs: stuck.length ? 'data-action="view" data-view="running" data-filter-stuck="on"' : 'data-action="view" data-view="running"' }

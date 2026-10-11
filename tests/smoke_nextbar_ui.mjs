@@ -12,6 +12,8 @@ const ov = views.slice(views.indexOf('export function renderOverview'), views.in
 ok(/class="nextbar"[^>]*aria-label=/.test(ov) && ov.indexOf('${nextbar}') > -1 && ov.indexOf('${nextbar}') < ov.indexOf('ov-main'), '行动条在概览主面板之上，带 aria-label（2026-10-02 起去掉了指标数字行）');
 ok(/ext && ext\.inbox != null && \{[^}]*'收件箱'[^}]*href: '\/hub#inbox'/.test(ov) && /ext && ext\.feedback != null && \{[^}]*'未处理反馈'[^}]*href: '\/hub#feedback'/.test(ov), '收件箱 / 反馈只在扩展摘要可用时出现，直达 hub 对应分页');
 ok(/userWait\.length === 1 \? `data-action="open-decision"/.test(ov) && ov.includes('data-action="goto-status" data-view="decisions" data-status="merged"'), '待拍板：1 项直接打开，多项跳决策页并筛「待采纳」');
+ok(/const asks = pendingDecisionItems\(p\)\.filter\(x => !x\.it\.decided && !x\.it\.answer\)/.test(ov) && /n: toDecide, label: '待拍板'/.test(ov), '待拍板 = 等你采纳的合并稿 + 等你回答的选择题（2026-10-10：只数前者时顶部显示「0 待拍板 · 都处理完了」，下面却有题等你）');
+ok(/asks\.length \? 'data-action="ov-tab" data-tab="decide"/.test(ov), '有选择题时点「待拍板」直接切到「等你拍板」面板');
 ok(/stallInfo\(d\)\.terminal/.test(ov) && ov.includes("'卡住的施工'") && ov.includes('data-view="running"'), '卡住的施工沿用 stallInfo 判定，直达进行中');
 // 松耦合：核心不直接请求扩展接口，只听 hub_badge 的广播（ARCHITECTURE 原则 1）；成功与失败都广播
 ok(!/(fetch|api|textApi)\(\s*['"`]\/api\/ext\/summary/.test(app + views + model), '核心代码不直接请求 /api/ext/summary（只看调用，注释里提到不算）');
