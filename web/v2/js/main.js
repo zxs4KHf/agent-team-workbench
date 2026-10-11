@@ -534,6 +534,13 @@ function bind() {
   document.addEventListener('change', e => {
     const t = e.target;
     if (t.matches('[data-action]')) { const fn = ACTIONS[t.dataset.action]; if (fn) fn(t, e); return; }
+    // 「跳到第 __ 页」（2026-10-11）：回车或离开输入框即跳，超出范围夹到首末页；不用 data-action，免得点进输入框就触发
+    if (t.matches('[data-page-jump],[data-hist-jump]')) {
+      if (t.value === '') return;
+      const to = String(Math.min(Number(t.max) || 1, Math.max(1, Math.round(Number(t.value) || 1))) - 1);
+      if (t.matches('[data-page-jump]')) ACTIONS.page({ dataset: { id: t.dataset.pageJump, to } }); else ACTIONS['hist-page']({ dataset: { to } }, e);
+      return;
+    }
     if (t.matches('#projectSelect')) { localStorage.setItem('bus.project', t.value); url.set({ p: t.value }); F.composer = null; F.composerDirty = false; viewTransition(() => store.set({ project: t.value })); return; }
     if (t.dataset.agentWeight) { saveAgentWeight(t.dataset.agentWeight, t.value); return; }
     if (t.dataset.qd) { const f = ensureComposer(); if (f) { f[t.dataset.qd] = t.value; F.composerDirty = true; } return; }
@@ -687,7 +694,8 @@ Object.assign(ACTIONS, {
   },
   // 概览标签页与分页（2026-10-02）
   'ov-tab': t => { setOvTab(t.dataset.tab, t.dataset.group || 'main'); renderView(S()); },
-  page: t => { F.pages = F.pages || {}; F.pages[t.dataset.id] = Math.max(0, (F.pages[t.dataset.id] || 0) + Number(t.dataset.dir || 0)); renderView(S()); },
+  // data-to 是渲染时算好的目标页（页码按钮、跳页框；上一页 / 下一页也带），没有才按 data-dir 相对翻
+  page: t => { F.pages = F.pages || {}; const to = t.dataset.to; F.pages[t.dataset.id] = Math.max(0, to != null && to !== '' ? Number(to) || 0 : (F.pages[t.dataset.id] || 0) + Number(t.dataset.dir || 0)); renderView(S()); },
   // Agent 页：点胶囊 → 抽屉里看全部详情与操作；点组名 → 编辑分组（工作台自己的分组）
   'agent-open': t => { const a = agentList().find(x => x.peer === t.dataset.peer); if (!a) return; openDrawer({ title: displayName(a.peer), subtitle: `${a.model || '模型未登记'} · ${a.peer}`, body: agentDetail(a.peer) }); },
   'group-edit': t => openDrawer({ title: '编辑分组', subtitle: t.dataset.group, body: groupForm(t.dataset.group) }),

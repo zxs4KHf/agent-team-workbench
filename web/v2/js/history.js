@@ -4,7 +4,7 @@
 // canonical id 一律用服务端下发的 canonical_id，前端不按 workspace 目录名重算（返工点 5/11：换工作区路径不该把全部历史重新标成未读）。
 import { esc, attr, icon, api, url, relTime, fmtDate } from './core.js';
 import { S, F, terminalStatuses } from './model.js';
-import { head, empty } from './views.js';
+import { head, empty, pagerNav } from './views.js';
 
 export const HISTORY_NAV = [['history', 'clock', '任务历史']];
 export const PAGE_SIZE = 20;
@@ -185,6 +185,9 @@ export function renderHistory() {
   const rs = st.read.status();
   const pages = resp ? Math.max(1, Math.ceil((resp.total || 0) / (resp.limit || PAGE_SIZE))) : 1;
   const last = !resp || resp.complete;
+  // 翻页取数期间 resp 为空：页码格沿用上次已知的页数，不缩成 1 格（缩了按钮就挪位，2026-10-11「这个选项会跑」）
+  if (resp) pg.knownPages = pages;
+  const shownPages = Math.max(resp ? pages : (pg.knownPages || 1), pg.idx + 1);
   const filters = `<select data-action="hist-kind" aria-label="类型筛选">${Object.entries(KIND_LABEL).map(([k, v]) => `<option value="${k}" ${f.kind === k ? 'selected' : ''}>${v}</option>`).join('')}</select>
     <button type="button" class="small ${f.unread ? 'primary' : 'ghost'}" data-action="hist-unread" aria-pressed="${f.unread}">只看未读 (${unreadN})</button>
     <button type="button" class="small ghost" data-action="hist-scope" aria-pressed="${f.scope === 'all'}">${f.scope === 'all' ? '全部项目' : '当前项目'}</button>
@@ -201,12 +204,8 @@ export function renderHistory() {
     ${view.stale && (view.newCount || view.removed.length) ? `<div class="banner" style="font-size:calc(13px * var(--fs-scale, 1))"><button type="button" class="small" data-action="hist-apply-new">${view.newCount ? `有 ${view.newCount} 条新内容` : ''}${view.newCount && view.removed.length ? '，' : ''}${view.removed.length ? `${view.removed.length} 条已移除` : ''} · 应用</button> <span class="faint">翻页与阅读中不自动换页</span></div>` : ''}
     <section class="card fit-panel" data-key="fit-history"><div class="fit-body">${rangeBar}
     <ol id="historyList" tabindex="-1" aria-label="任务历史列表" style="list-style:none;padding:0;margin:8px 0 0">${view.items.length ? view.items.map(it => histItemHtml(it, st)).join('') : `<li class="empty" style="padding:40px">${empty(loading ? '正在读取…' : f.unread ? '本页没有未读项' : '这一页没有记录', '换个筛选条件，或翻到下一页')}</li>`}</ol>
-    <nav aria-label="分页" class="pager">
-      <button type="button" class="small" data-action="hist-page" data-dir="-1" ${pg.idx <= 0 ? 'disabled aria-disabled="true"' : ''}>上一页</button>
-      <span aria-live="polite" data-hist-pagestatus>第 ${pg.idx + 1} / ${pages} 页 · 共 ${resp ? resp.total : '—'} 条${loading ? ' · 加载中' : ''}</span>
-      <button type="button" class="small" data-action="hist-page" data-dir="1" ${last ? 'disabled aria-disabled="true"' : ''}>下一页</button>
-      <button type="button" class="small ghost" data-action="hist-reload">${icon('refresh')}重新取本页</button>
-    </nav></div></section></div>`;
+    ${pagerNav({ pg: pg.idx, pages: shownPages, atEnd: last, status: `第 ${pg.idx + 1} / ${pages} 页 · 共 ${resp ? resp.total : '—'} 条${loading ? ' · 加载中' : ''}`, act: 'hist-page', jumpAttr: ' data-hist-jump', extra: `<button type="button" class="small ghost" data-action="hist-reload">${icon('refresh')}重新取本页</button>` })}
+    </div></section></div>`;
 }
 
 // ---------- 动作 ----------
@@ -230,7 +229,8 @@ export const HISTORY_ACTIONS = {
   'hist-kind': (t, rerender) => { const st = histState(); st.filters.kind = ['all', 'commands', 'decisions'].includes(t.value) ? t.value : 'all'; st.frozen = null; const pg = pageOf(st, dataKey(st)); pg.idx = 0; syncUrl(st, pg, true); rerender(); loadHistory(); },
   'hist-unread': (t, rerender) => { const st = histState(); st.filters.unread = !st.filters.unread; st.frozen = null; syncUrl(st, pageOf(st, dataKey(st)), true); rerender(); },
   'hist-scope': (t, rerender) => { const st = histState(); st.filters.scope = st.filters.scope === 'all' ? 'current' : 'all'; st.frozen = null; const pg = pageOf(st, dataKey(st)); pg.idx = 0; syncUrl(st, pg, true); rerender(); loadHistory(); },
-  'hist-page': (t, rerender) => { const st = histState(), pg = pageOf(st, dataKey(st)); const next = pg.idx + Number(t.dataset.dir || 1); if (next < 0) return; pg.idx = next; st.frozen = null; syncUrl(st, pg, true); rerender(); loadHistory(); },
+  // 页码按钮 / 跳页框带 data-to（目标页，0 起）；只有 data-dir 时相对翻。跳到后面的页由 loadHistory 沿游标链逐页取到（与 410 重取同一条路）
+  'hist-page': (t, rerender) => { const st = histState(), pg = pageOf(st, dataKey(st)); const to = t.dataset.to; const next = to != null && to !== '' ? Number(to) : pg.idx + Number(t.dataset.dir || 1); if (!Number.isFinite(next) || next < 0 || next === pg.idx) return; pg.idx = next; st.frozen = null; syncUrl(st, pg, true); rerender(); loadHistory(); },
   'hist-reload': () => loadHistory(true),
   'hist-apply-new': (t, rerender) => { histState().applyNew = true; rerender(); },
   'hist-mark-page-read': (t, rerender) => { const st = histState(); st.read.markPage(computeView(S()).view.items.filter(it => !it.removed)); rerender(); },

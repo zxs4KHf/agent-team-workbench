@@ -27,8 +27,27 @@ export function capped(key, items, render, cap = LIST_CAP) {
   const { rows, pager } = pageParts(key, items, cap);
   return rows.map(render).join('') + pager;
 }
+// 翻页条（2026-10-11 用户：「这个选项会跑」「没有直接输入页码跳页」）。原来「上一页 · 第 x/y 页 · 下一页」挤在中间、跟着列表走，
+// 每页内容高矮不同，按钮就上下左右挪位，连点下一页会点空。现在：上一页贴左、下一页贴右；中间页码格数固定——不超过 7 页全列，
+// 多了固定 7 格（首页、…、当前页前后、…、末页），翻页时格子不增不减；超过 7 页再给「跳到第 __ 页」输入框（回车或离开即跳）。
+// 贴面板底由 components.css「分页条贴底」负责。任务历史（游标分页）也用这一套：act / idAttr / jumpAttr 换成它自己的动作。
+export function pageSlots(pg, pages) {
+  if (pages <= 7) return Array.from({ length: pages }, (_, i) => i);
+  if (pg <= 3) return [0, 1, 2, 3, 4, -1, pages - 1];
+  if (pg >= pages - 4) return [0, -1, pages - 5, pages - 4, pages - 3, pages - 2, pages - 1];
+  return [0, -1, pg - 1, pg, pg + 1, -1, pages - 1];
+}
+export function pagerNav({ pg, pages, status, act, idAttr = '', jumpAttr = '', key = '', extra = '', atEnd = pg >= pages - 1 }) {
+  const ghost = 'small ghost', step = (dir, label, off) => `<button type="button" class="${ghost}" data-action="${act}"${idAttr} data-to="${pg + dir}" data-dir="${dir}" ${off ? 'disabled aria-disabled="true"' : ''}>${label}</button>`;
+  const nums = pageSlots(pg, pages).map(i => i < 0 ? '<span class="pg-gap" aria-hidden="true">…</span>'
+    : i === pg ? `<span class="pg-num on" aria-current="page">${i + 1}</span>`
+      : `<button type="button" class="${ghost} pg-num" data-action="${act}"${idAttr} data-to="${i}" aria-label="第 ${i + 1} 页">${i + 1}</button>`).join('');
+  const jump = pages > 7 ? `<label class="pg-jump">跳到 <input type="number" min="1" max="${pages}" step="1" inputmode="numeric" placeholder="${pg + 1}"${jumpAttr} aria-label="跳到第几页（1–${pages}）"> 页</label>` : '';
+  return `<nav class="pager" aria-label="分页"${key ? ` data-key="${key}"` : ''}><span class="pg-side">${step(-1, '上一页', pg <= 0)}<span class="pg-status faint" aria-live="polite"${act === 'hist-page' ? ' data-hist-pagestatus' : ''}>${status}</span></span>`
+    + `<span class="pg-nums">${nums}</span><span class="pg-side end">${extra}${jump}${step(1, '下一页', atEnd)}</span></nav>`;
+}
 function pagerHtml(key, pg, pages, total) {
-  return `<div class="pager" data-key="pager:${attr(key)}"><button type="button" class="small ghost" data-action="page" data-id="${attr(key)}" data-dir="-1" ${pg === 0 ? 'disabled' : ''}>上一页</button><span class="faint">第 ${pg + 1} / ${pages} 页 · 共 ${total} 项</span><button type="button" class="small ghost" data-action="page" data-id="${attr(key)}" data-dir="1" ${pg === pages - 1 ? 'disabled' : ''}>下一页</button></div>`;
+  return pagerNav({ pg, pages, status: `第 ${pg + 1} / ${pages} 页 · 共 ${total} 项`, act: 'page', idAttr: ` data-id="${attr(key)}"`, jumpAttr: ` data-page-jump="${attr(key)}"`, key: `pager:${attr(key)}` });
 }
 
 // ===== 概览重排（2026-10-02，用户：「往下拉特别长」「提高信息密度」「加分页」）=====

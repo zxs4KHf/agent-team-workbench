@@ -1,0 +1,3 @@
+# cmd 读 LF 换行的 UTF-8 批处理会切错行（tools/grant_admin.bat 曾因此运行即退出）
+*.bat text eol=crlf
+*.cmd text eol=crlf
