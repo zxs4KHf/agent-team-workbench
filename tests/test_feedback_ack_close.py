@@ -1,4 +1,4 @@
-"""体验反馈闭环：记录 → 转任务（生成 Leader 指令）→ Leader 回执即自动关闭反馈。全部在临时目录里跑。"""
+"""体验反馈闭环：记录 → 转任务（生成 Leader 指令）→ Leader 回执只推进到待验证或暂缓。全部在临时目录里跑。"""
 import os
 import shutil
 import sys
@@ -39,22 +39,22 @@ class FeedbackAckClose(unittest.TestCase):
     def status(self, fid):
         return next(x for x in FB.items() if x["id"] == fid)
 
-    def test_ok_marks_done_with_result(self):
+    def test_ok_awaits_verification_with_result(self):
         fid, cid = self.converted()
         cmd = P.pending_commands()[0]
         self.assertEqual(cmd["payload"]["feedback_id"], fid)
         self.assertIn("回执本指令 ok=true", cmd["payload"]["text"])
         self.assertEqual(P.ack_command(cid, "已修复 abc1234", ok=True), f"ACK {cid}")
         rec = self.status(fid)
-        self.assertEqual(rec["status"], "done")
+        self.assertEqual(rec["status"], "awaiting_verification")
         self.assertIn("abc1234", rec["history"][-1]["note"])
         self.assertIn(cid, rec["history"][-1]["note"])
-        self.assertIn("feedback.done", [e["type"] for e in E.read()["events"]])
+        self.assertIn("feedback.awaiting_verification", [e["type"] for e in E.read()["events"]])
 
-    def test_not_ok_marks_dismissed(self):
+    def test_not_ok_defers(self):
         fid, cid = self.converted()
         P.ack_command(cid, "复现不了，不改", ok=False)
-        self.assertEqual(self.status(fid)["status"], "dismissed")
+        self.assertEqual(self.status(fid)["status"], "deferred")
 
     def test_repeat_ack_and_manual_close_untouched(self):
         fid, cid = self.converted()
@@ -86,8 +86,8 @@ class FeedbackAckClose(unittest.TestCase):
         # 崩溃 / 失败后再回执一次即可补关（重复回执返回 already done，但仍会尝试关闭）
         self.assertIn("already done", P.ack_command(cid, "补回执 def5678"))
         rec = self.status(fid)
-        self.assertEqual(rec["status"], "done")
-        self.assertIn("def5678", rec["history"][-1]["note"])
+        self.assertEqual(rec["status"], "awaiting_verification")
+        self.assertIn("done", rec["history"][-1]["note"])  # replay uses persisted original ACK, not new prose
 
     def test_malformed_done_record_never_blocks_ack(self):
         cid = "20260928-000000-beef"
@@ -109,7 +109,7 @@ class FeedbackAckClose(unittest.TestCase):
         self.assertEqual((rec["status"], rec["command_id"]), ("converted", new))
         P.ack_command(new, "第二轮结论 9abc", ok=True)
         rec = self.status(fid)
-        self.assertEqual(rec["status"], "done")
+        self.assertEqual(rec["status"], "awaiting_verification")
         self.assertIn("第二轮结论", rec["history"][-1]["note"])
 
     def test_update_expect_guard(self):

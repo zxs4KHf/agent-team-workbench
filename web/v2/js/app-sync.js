@@ -71,6 +71,11 @@ export function connectLive() {
     es.addEventListener('ping', () => store.set({ lastRefresh: Date.now() }));
     es.onerror = () => { es.close(); store.set({ live: 'poll' }); setTimeout(open, backoff); backoff = Math.min(backoff * 2, 30000); };
   };
+  // 反馈 fb-2154160fae：轮询在 document.hidden 时整体跳过，切回标签页后最多要等一个周期才更新；回到前台立刻补一次
+  if (!connectLive._vis) {
+    connectLive._vis = true;
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });
+  }
   open();
   startPoll(15000);
 }

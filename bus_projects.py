@@ -349,6 +349,32 @@ def decisions(slug: str) -> list:
     return B.read_json(os.path.join(project_dir(slug), "decisions.json"), []) or []
 
 
+_PFT_CACHE: dict = {}   # task_id -> (取数时刻, project)；反查 60 秒缓存（合并稿 20261001-092817-9486）
+
+
+def project_for_task(task_id: str) -> str:
+    """任务的真实归属项目：先查 outbox/log 的 meta.project（派发时写入）；旧任务没有这个字段，
+    就逐项目反查 decisions.json；都没有返回空串（调用方回落到当前项目，且必须带 _notice，不许静默）。
+    反查带 60 秒缓存：post / _full_state 高频路径不反复扫盘，负结果（空串）同样缓存。"""
+    tid = str(task_id or "").strip()
+    if not tid:
+        return ""
+    now = time.time()
+    hit = _PFT_CACHE.get(tid)
+    if hit and now - hit[0] < 60.0:
+        return hit[1]
+    meta, _where = B.find_meta(tid)
+    slug = str((meta or {}).get("project") or "")
+    if not slug:
+        for p in list_projects():
+            s = p.get("slug") if isinstance(p, dict) else str(p)
+            if s and any(x.get("task_id") == tid for x in decisions(s)):
+                slug = s
+                break
+    _PFT_CACHE[tid] = (now, slug)
+    return slug
+
+
 @serialized_project
 def save_decisions(slug: str, items: list):
     invalidate_state()
@@ -1074,7 +1100,9 @@ ORPHAN_NOTE = "上一位 Leader 会话处理这条指令时断开了，可能已
 
 
 def live_leader_sessions() -> dict:
-    """真 Leader 当前在线的会话：peers/controller.json 的 sessions 里心跳未过期的（不含 keepalive 保活进程）。"""
+    """真 Leader 当前在线的会话：peers/controller.json 的 sessions 里心跳未过期的（不含 keepalive 保活进程）。
+    注意：这里**包含**过路调用者的临时会话——orphaned_commands 靠它判断「领取者是否还活着」，
+    过滤过严会把真 Leader 正在处理的指令误判成孤儿退回队列（fb-1b5ec6d4cf 不变量 5）。展示层请用 real_leader_sessions()。"""
     c = B.read_json(os.path.join(B.PEERS, f"{CONTROLLER}.json"), None) or {}
     out = {}
     for sid, s in (c.get("sessions") or {}).items():
@@ -1084,6 +1112,17 @@ def live_leader_sessions() -> dict:
         if not skewed and age <= B.SESSION_TTL_SEC:
             out[sid] = {**s, "age_sec": int(age)}
     return out
+
+
+def real_leader_sessions() -> dict:
+    """Leader 名单（fb-1b5ec6d4cf）：live 里再滤掉「过路调用者」。
+    过路会话 = 没有显示名、带 temp 标记、且没领过任何指令——不算 Leader、不计入在线人数，
+    但留在 sessions 里供孤儿回收使用。领了指令的临时会话自动转正（它在干 Leader 的活）。
+    「在线 Leader 数 = 渲染行数」由此保证：同一会话不会被算两次，过路会话一行都不出。"""
+    live = live_leader_sessions()
+    claimed_sids = {c.get("claimed_session") for c in claimed_commands() if c.get("claimed_session")}
+    return {sid: s for sid, s in live.items()
+            if s.get("label") or not s.get("temp") or sid in claimed_sids}
 
 
 def request_handback(by: str = "user") -> dict:
@@ -1138,7 +1177,7 @@ def ack_command(cid: str, result: str, ok: bool = True, task_id: str = "", proje
     with implementation_mutex(COMMANDS):
         out = _ack_command(cid, result, ok, task_id=task_id, project=project, session=session)
     # 必须在 COMMANDS 锁之外：FB.update 持 feedback 锁调用 push_command，锁内调用会形成反向锁序（fable2 4097）。
-    # 每次回执（含重复回执）都尝试关闭：只动仍为 converted 的反馈，所以幂等；
+    # 每次回执（含重复回执）都尝试推进反馈：只动仍为 converted 的反馈，所以幂等；
     # 进程恰好在上一行之后崩溃时，Leader 再回执一次即可补关，也不依赖返回文案。
     _close_feedback(cid, ok, result)
     _ack_decision_answer(cid)
@@ -1146,7 +1185,7 @@ def ack_command(cid: str, result: str, ok: bool = True, task_id: str = "", proje
 
 
 def _close_feedback(cid: str, ok: bool, result: str):
-    """体验反馈转来的指令一经回执，就把反馈标为 done（ok）或 dismissed（not ok），闭环不靠人记得回去点。
+    """指令处理与问题解决分离：成功待验证，失败暂缓；不自动进入终态。
     只处理仍是 converted 的反馈；出错只记事件，不影响回执本身（docs/adr/0004）。"""
     fid = ""
     try:
@@ -1156,7 +1195,10 @@ def _close_feedback(cid: str, ok: bool, result: str):
         if not fid:
             return
         import bus_feedback as FB
-        FB.update(fid, "done" if ok else "dismissed", f"{(result or '').strip()}（回执指令 {cid}）", expect="converted", expect_command_id=cid)
+        # Use the persisted ACK, not potentially contradictory retry arguments.
+        status = "awaiting_verification" if done.get("status") == "done" else "deferred"
+        stored_result = str(done.get("result") or "")
+        FB.update(fid, status, f"{stored_result.strip()}（回执指令 {cid}）", expect="converted", expect_command_id=cid)
     except Exception as e:  # noqa: BLE001  反馈是旁路记录，绝不能让它挡住回执
         import bus_events as E
         E.emit("feedback.close_failed", {"id": str(fid or ""), "command_id": cid, "error": str(e)[:300]}, subject=str(fid or cid))
@@ -1603,6 +1645,9 @@ def console_wait(timeout_sec: int, holder: str = CONTROLLER, session: str = "", 
     assigned = False
     if holder == CONTROLLER and not session:
         session, assigned = uuid.uuid4().hex[:8], True
+    # fb-1b5ec6d4cf：没报显示名的首次分配 = 过路调用者，标记临时会话（短 TTL、不进 Leader 名单）。
+    # 报了名字即转正；带 session 回来但始终不报名的，保持临时（temp=None 维持原标记）。
+    temp_flag = False if name else (True if assigned else None)
 
     def respond(text: str) -> str:
         # Every controller response must return its identity, including commands,
@@ -1618,7 +1663,7 @@ def console_wait(timeout_sec: int, holder: str = CONTROLLER, session: str = "", 
         if holder == CONTROLLER:
             # 真Leader回归：通知代理交回，下一圈再来
             B.write_json(os.path.join(B.ROOT, "console", "handback.json"), {"to": CONTROLLER, "at": B.now_iso()})
-            B.heartbeat(CONTROLLER, "idle", "controller", session=session)
+            B.heartbeat(CONTROLLER, "idle", "controller", session=session, temp=temp_flag)
             # from/to 按真实旧新 holder：权威此刻仍在代理手里（controller → 代理），只是「等交回」；不写成已经交回
             B.note_lead_event(CONTROLLER, l.get("holder") or "", l.get("epoch"), "lease_lost",
                               f"真 Leader 回归时租约仍由代理 {l.get('holder')} 持有，已写入交回请求，等待其下一圈释放。")
@@ -1629,7 +1674,7 @@ def console_wait(timeout_sec: int, holder: str = CONTROLLER, session: str = "", 
         if os.path.exists(hb):
             os.remove(hb)
         # 多活：先报到（带显示名），再把已断开会话手上的指令退回队列——在线的 Leader 们接着分
-        B.heartbeat(CONTROLLER, "idle", "controller", session=session, label=name)
+        B.heartbeat(CONTROLLER, "idle", "controller", session=session, label=name, temp=temp_flag)
         try:
             release_orphan_commands(by=f"auto:{session}")
         except Exception:
@@ -1638,7 +1683,7 @@ def console_wait(timeout_sec: int, holder: str = CONTROLLER, session: str = "", 
     cooldown, stale_min = _notify_settings()
     while True:
         if holder == CONTROLLER:
-            B.heartbeat(CONTROLLER, "idle", "controller", session=session, label=name)
+            B.heartbeat(CONTROLLER, "idle", "controller", session=session, label=name, temp=temp_flag)
         else:
             # relay 是角色不是活动：写 think + role=relay，代理 Leader 期间不再被判离线（旧写法 status=relay 不在 online 白名单里）
             B.heartbeat(holder, "think", "", "", role="relay")
@@ -1701,6 +1746,16 @@ def _post_impl(slug: str, task_id: str = "", status: str = "", title: str = "", 
         raise ValueError("brief_draft 要同时给 task_id")
     if intro_source and intro is None:
         raise ValueError("intro_source 必须与 intro 一起写入")
+    # 跨项目串台修复（合并稿 20261001-092817-9486）：先定任务真实归属再动项目。
+    # Leader 传入的 slug 只是提示：meta.project 优先（派发时写入）；旧任务无记录才回落当前项目，且回执必须带 _notice，不许静默记账。
+    notice = ""
+    if task_id:
+        real = project_for_task(task_id)
+        if real and real != slug:
+            notice = f"_notice: 任务 {task_id} 实际归属项目「{real}」，已按真实归属记账；传入的项目「{slug}」被忽略"
+            slug = real
+        elif not real:
+            notice = f"_notice: 任务 {task_id} 在 meta 与各项目决策里都没有归属记录，已回落到当前项目「{slug}」记账（旧任务无 project 字段属预期）"
     p = load_project(slug)
     changed = []
     adopted = ""
@@ -1780,6 +1835,8 @@ def _post_impl(slug: str, task_id: str = "", status: str = "", title: str = "", 
         changed.append("note")
     save_project(p)
     msg = "POSTED " + ", ".join(changed)
+    if notice:
+        msg += "\n" + notice
     if adopted:
         msg += f"\n已一键采用 brief 草稿：{adopted}"
     elif task_id and brief is None and not brief_draft:
@@ -1944,7 +2001,7 @@ def dispatch_race(payload: dict) -> dict:
         path = a.get("path") if isinstance(a, dict) else a
         if path:
             ctx.append(str(path))
-    r = B.dispatch(CONTROLLER, peers, "independent", question, ctx, ttl_min=int(payload.get("ttl_min") or 30), race=True)
+    r = B.dispatch(CONTROLLER, peers, "independent", question, ctx, ttl_min=int(payload.get("ttl_min") or 30), race=True, project=slug)
     if slug:
         upsert_decision(slug, r["task_id"], status="dispatched", title=question[:60], peers=r["peers"], mode="race",
                         tier=tier_of(r["peers"]), tier_source="auto", online_n=online_agents_n())
@@ -2036,7 +2093,7 @@ def dispatch_implement(slug: str, task_id: str, by: str = "user", comment: str =
             return out
         repo_dir = load_project(slug).get("repo_dir") or B.WORKSPACE
         extra = f"\n\n## 用户补充\n{comment.strip()}" if str(comment or "").strip() else ""
-        r = B.dispatch(CONTROLLER, [builder], "build", pack["markdown"] + extra + BUILD_DIRECT_TAIL, [], int(ttl_min), repo_dir=repo_dir)
+        r = B.dispatch(CONTROLLER, [builder], "build", pack["markdown"] + extra + BUILD_DIRECT_TAIL, [], int(ttl_min), repo_dir=repo_dir, project=slug)
         upsert_decision(slug, task_id, implementation_task_id=r["task_id"], execution="pending", execution_by=by, execution_at=B.now_iso())
     if queued:
         ack_command(queued, f"task_id: {r['task_id']}\n用户在工作台直接派给 {builder} 施工，这条排队指令不再需要 Leader 处理")
@@ -2371,7 +2428,61 @@ def _land_summary() -> dict:
         return {"error": str(exc)[:200]}
 
 
+def _unbound_tasks_view(dec_task_ids: set) -> list:
+    """出现在 outbox/<task_id>.meta.json 但不被任何项目 decisions.json 引用的任务的只读投影。
+    每条至少含：task_id、mode、from、peers、created、question 摘要（截断到 ~60 字）、answers_count（已到回答份数）；
+    若 console/builds/<task_id>.json 有记录，再带上 commit / review / merge_commit 状态。
+    此投影只读、绝不写盘，不影响 decisions.json 与 status 桶（体验反馈 fb-28bb2a1d9a）。"""
+    out = []
+    if not os.path.isdir(B.OUTBOX):
+        return out
+    builds_dir = os.path.join(B.ROOT, "console", "builds")
+    for fname in sorted(os.listdir(B.OUTBOX)):
+        if not fname.endswith(".meta.json"):
+            continue
+        tid = fname[:-10]
+        if tid in dec_task_ids:
+            continue
+        meta = B.read_json(os.path.join(B.OUTBOX, fname), None)
+        if not isinstance(meta, dict):
+            continue
+        peers = meta.get("peers") or []
+        answers_count = sum(1 for p in peers if os.path.exists(os.path.join(B.OUTBOX, f"{tid}.{p}.md")))
+        q = str(meta.get("question") or "").strip()
+        q_summary = (q[:60] + "…") if len(q) > 60 else q
+        item = {
+            "task_id": tid,
+            "mode": meta.get("mode") or "",
+            "from": meta.get("from") or "",
+            "peers": peers,
+            "created": meta.get("created") or "",
+            "question": q_summary,
+            "answers_count": answers_count,
+        }
+        bpath = os.path.join(builds_dir, f"{tid}.json")
+        bdata = B.read_json(bpath, None) if os.path.exists(bpath) else None
+        if isinstance(bdata, dict):
+            tm = bdata.get("teammates") or {}
+            commits, reviews = [], []
+            merge_commit = bdata.get("merge_commit") or ""
+            for tm_name, tm_info in tm.items():
+                if isinstance(tm_info, dict):
+                    if tm_info.get("commit"):
+                        commits.append(str(tm_info["commit"])[:10])
+                    if tm_info.get("review"):
+                        reviews.append(str(tm_info["review"]))
+                    if not merge_commit and tm_info.get("merge_commit"):
+                        merge_commit = str(tm_info["merge_commit"])
+            item["commit"] = ", ".join(commits) if commits else ""
+            item["review"] = ", ".join(reviews) if reviews else ""
+            item["merge_commit"] = merge_commit
+            item["build_status"] = bdata.get("status") or ""
+        out.append(item)
+    return out
+
+
 def _full_state() -> dict:
+    """返回全站完整状态聚合。顶层包含 unbound：出现在 outbox 但未被任何项目 decisions.json 引用的任务只读投影。"""
     import bus_lineage as L  # 延迟导入：bus_lineage 依赖本模块的 decisions / upsert_decision
     ensure()
     B.model_groups()   # 分组缓存预热（本地文件）：peer_state 读缓存算 effective_group
@@ -2399,11 +2510,14 @@ def _full_state() -> dict:
             pe["wait_returns_in"] = max(0, int(pe.get("wait_timeout", 0) - waited))
     projects = []
     snap = implementation_snapshot(peers)  # 一次遍历，所有项目所有决策共用
+    all_dec_tids = set()
     for p in list_projects():
         with project_mutex(p["slug"]):
             items = decisions(p["slug"])
             dirty = False
             for rec in items:
+                if rec.get("task_id"):
+                    all_dec_tids.add(rec["task_id"])
                 rec["progress"] = task_progress(rec["task_id"]) if rec["status"] in ("dispatched", "collecting", "ready_for_merge") else None
                 if rec["status"] == "adopted" and (rec.get("execution") or "pending") == "pending":
                     # 待落地：合成进度真值（只读磁盘，不回写 execution）
@@ -2424,6 +2538,7 @@ def _full_state() -> dict:
             if dirty:
                 save_decisions(p["slug"], items)
             projects.append({**p, "decisions": items, "threads": L.threads(items)})
+    unbound = _unbound_tasks_view(all_dec_tids)
     controller = B.peer_state(CONTROLLER)
     lease = B.lease()
     holder = (lease or {}).get("holder") or ""
@@ -2447,6 +2562,7 @@ def _full_state() -> dict:
             "brief_alert_ratio": brief_alert_ratio(),
             "allocator": _allocator_view(),
             "agent_groups": _agent_groups_view(),
+            "unbound": unbound,
             **leaders_view()}
 
 
@@ -2468,12 +2584,15 @@ def _allocator_view():
 
 def leaders_view() -> dict:
     """多活 Leader 的展示数据：每位在线 Leader 一行（显示名、在做什么、手上几条指令），外加指令队列三分。
-    界面据此列出「几位 Leader 在线、各自是谁」，新会话接入是多出一行，而不是把唯一的名字换掉。"""
+    界面据此列出「几位 Leader 在线、各自是谁」，新会话接入是多出一行，而不是把唯一的名字换掉。
+    行单用 real_leader_sessions()（fb-1b5ec6d4cf）：过路调用者的临时会话不进名单、不计人数；
+    孤儿判定仍用 live_leader_sessions()（含临时会话），否则会把过路会话手上的指令误判成孤儿。"""
     live = live_leader_sessions()
+    real = real_leader_sessions()
     claimed = claimed_commands()
     orphans = {c["id"] for c in orphaned_commands(live)}
     rows = []
-    for sid, s in sorted(live.items(), key=lambda kv: str(kv[1].get("joined") or "")):
+    for sid, s in sorted(real.items(), key=lambda kv: str(kv[1].get("joined") or "")):
         mine = [c["id"] for c in claimed if c.get("claimed_session") == sid]
         rows.append({"session": sid, "label": s.get("label") or "", "activity": s.get("activity") or "idle",
                      "age_sec": s.get("age_sec"), "joined": s.get("joined") or "", "claimed": mine})

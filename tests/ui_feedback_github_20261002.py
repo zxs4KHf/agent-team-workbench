@@ -98,6 +98,19 @@ class FeedbackGithubUI(unittest.TestCase):
             self.assertNotIn(leak, body)
         pg.wait_for_function("() => true")
         self.assertEqual(len(self.posts), 1, "本机也存一份")
+        # 反馈 fb-abd29e3511：发到 GitHub 后下一步动作在新标签页，面板应自动收起（原先一直留着挡路）
+        pg.wait_for_function("() => !document.querySelector('.wbfb-panel')", timeout=6000)
+        self.assertEqual(pg.locator(".wbfb-panel").count(), 0, "发到 GitHub 后面板应自动关闭")
+        pg.close()
+
+    def test_copy_keeps_panel_open(self):
+        """对照：复制内容不收起面板，用户还要回本页面粘贴。防止把两种外发行为一刀切。"""
+        pg = self.page("someone/agent-workbench")
+        pg.click(".wbfb-btn")
+        pg.fill("#wbfbText", "复制这条")
+        pg.click("[data-x='copy']")
+        pg.wait_for_timeout(2500)
+        self.assertEqual(pg.locator(".wbfb-panel").count(), 1, "复制后面板应留着")
         pg.close()
 
     def test_no_repo_no_github_button_but_copy_exists(self):

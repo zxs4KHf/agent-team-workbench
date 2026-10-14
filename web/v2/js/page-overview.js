@@ -1,9 +1,18 @@
 // page-overview.js：从 views.js 拆出（ADR 0015，按页面拆模块；scripts/split_module.py 生成，函数体未改）
 // 视图：概览、进行中、决策、成果
 import { esc, attr, icon, sparkline, ring, fmtDate, relTime, minutesSince } from './core.js';
-import { S, F, project, decisions, activeDecisions, isUnbound, UNBOUND_HINT, runningDecisions, doneDecisions, agentList, onlineAgents, agentByName, projectPeers, displayName, titleOf, displayTitle, bucketOf, BUCKETS, threadsOf, childrenOf, artifactsOf, deliveredDecisions, weekDelivered, progressOf, stallInfo, countPending, STATUS, STATUS_TONE, EXEC_LABEL, PEER_STATE, ARTIFACT_KIND, orderedTasks, taskTier } from './model.js';
+import { S, F, project, decisions, activeDecisions, isUnbound, UNBOUND_HINT, runningDecisions, unboundTasks, doneDecisions, agentList, onlineAgents, agentByName, projectPeers, displayName, titleOf, displayTitle, bucketOf, BUCKETS, threadsOf, childrenOf, artifactsOf, deliveredDecisions, weekDelivered, progressOf, stallInfo, countPending, STATUS, STATUS_TONE, EXEC_LABEL, PEER_STATE, ARTIFACT_KIND, orderedTasks, taskTier } from './model.js';
 
 import { BRIEF_FALLBACK, WAIT_FOR_YOU_COPY, artifactCard, briefKindOf, capped, chip, empty, head, ovTabKey } from './views.js';
+
+// 进行中任务的「谁在做」（反馈 fb-2154160fae）：后端 task_progress() 已算好 states/ages 并随 /api/state 下发，
+// 这里只做渲染，不新增数据请求。
+const PEER_TONE = { answered: 'ok', working: 'violet', stalled: 'warn', queued: 'info', expired: 'bad', missing: 'plain' };
+export function peerStateChips(states) {
+  const es = Object.entries(states || {});
+  if (!es.length) return '';
+  return es.map(([pe, st]) => `<span class="chip ${PEER_TONE[st] || 'plain'}">${esc(displayName(pe))}·${esc(PEER_STATE[st] || st)}</span>`).join('');
+}
 
 export function ovTabs(tabs, group = 'main') {
   let want = ''; try { want = localStorage.getItem(ovTabKey(group)) || ''; } catch { /* 存储不可用 */ }
@@ -106,12 +115,18 @@ function healthStrip() {
   const fake = online.filter(a => a.activity === 'idle' && a.listening === false), benched = ag.filter(a => a.benched);
   const leaders = Array.isArray(s.leaders) ? s.leaders.length : 0;
   const b = (s.allocator && s.allocator.last_plan && s.allocator.last_plan.backlog) || null;
+  // 反馈 fb-2154160fae：概览要回答「几个任务在跑 / 几个人在干活」，不能只给「在等任务」的人数
+  const runList = runningDecisions(project());
+  const workingPeers = new Set();
+  runList.forEach(d => { const st = progressOf(d).states || {}; Object.entries(st).forEach(([pe, v]) => { if (v === 'working' || v === 'stalled') workingPeers.add(pe); }); });
   const item = (n, label, tone, attrs, tip) => `<button type="button" class="nb-item ${n ? tone : 'zero'}" ${attrs}${tip ? ` data-tip="${attr(tip)}"` : ''}><b>${esc(String(n))}</b>${esc(label)}</button>`;
   const items = [
     `<button type="button" class="nb-item ${waiting.length ? 'ok' : 'danger'}" data-action="view" data-view="peers" data-tip="正在调用 bus_wait_task、派过去马上有人领的 Agent / 显示在线的 Agent"><b>${waiting.length}/${online.length}</b>在等任务 / 在线</button>`,
     item(fake.length, '在线但没在等任务', 'warn', 'data-action="view" data-view="peers"', '心跳在，但没在等任务：派给它的单不会有人领，30 分钟后系统会收走改派'),
     item(benched.length, '暂停派单', 'danger', 'data-action="view" data-view="peers"', '24 小时内两次领了任务不干活，交出一次回复后恢复'),
     item(leaders, 'Leader 在线', leaders ? 'ok' : 'danger', 'data-action="view" data-view="peers"', ''),
+    item(runList.length, '进行中任务', 'violet', 'data-action="view" data-view="running"', '本项目正在跑的任务数：回答没到齐、还没合并的都算'),
+    item(workingPeers.size, '正在作答', 'ok', 'data-action="view" data-view="peers"', '已领取任务、正在作答或超时未回的 Agent（按人去重）'),
     b && item(b.review || 0, '待审', 'violet', 'data-action="view" data-view="running"', '已提交、还没人审的施工'),
     b && item(b.build || 0, '施工没人做', 'warn', 'data-action="view" data-view="running"', '施工单压在离线 / 不干活的人手上'),
     b && item(b.answer || 0, '回答没人做', 'warn', 'data-action="view" data-view="running"', '讨论 / 独立作答的名额压在离线 / 不干活的人手上')
@@ -151,12 +166,14 @@ export function renderOverview(p) {
   const asks = pendingDecisionItems(p).filter(x => !x.it.decided && !x.it.answer);
   const askIds = new Set(asks.map(x => x.d.task_id));
   const toDecide = asks.length + userWait.filter(d => !askIds.has(d.task_id)).length;
+  const unb = unboundTasks();
   const nb = [
     { n: toDecide, label: '待拍板', tone: 'violet', attrs: asks.length ? 'data-action="ov-tab" data-tab="decide" data-group="main"'
       : userWait.length === 1 ? `data-action="open-decision" data-id="${attr(userWait[0].task_id)}"` : 'data-action="goto-status" data-view="decisions" data-status="merged"' },
     ext && ext.inbox != null && { n: ext.inbox, label: '收件箱', tone: 'info', href: '/hub#inbox' },
     ext && ext.feedback != null && { n: ext.feedback, label: '未处理反馈', tone: 'warn', href: '/hub#feedback' },
-    { n: stuck.length, label: '卡住的施工', tone: 'danger', attrs: stuck.length ? 'data-action="view" data-view="running" data-filter-stuck="on"' : 'data-action="view" data-view="running"' }
+    { n: stuck.length, label: '卡住的施工', tone: 'danger', attrs: stuck.length ? 'data-action="view" data-view="running" data-filter-stuck="on"' : 'data-action="view" data-view="running"' },
+    unb.length ? { n: unb.length, label: '未归属', tone: 'warn', attrs: 'data-action="view" data-view="running"' } : null
   ].filter(Boolean);
   const nbItem = it => { const cls = `nb-item ${it.n ? it.tone : 'zero'}`, inner = `<b>${it.n}</b>${esc(it.label)}`; return it.href ? `<a class="${cls}" href="${it.href}">${inner}</a>` : `<button type="button" class="${cls}" ${it.attrs}>${inner}</button>`; };
   const nextbar = `<nav class="nextbar" aria-label="需要你处理的事" data-key="nextbar">${nb.some(x => x.n) ? '' : '<span class="nb-clear">✓ 都处理完了</span>'}${nb.map(nbItem).join('')}</nav>`;
@@ -171,7 +188,7 @@ export function renderOverview(p) {
         { key: 'master', label: '等 Leader', n: master.length, html: master.length ? `<div class="focus">${capped('master', master, focusItem)}</div>` : empty('Leader 队列为空') }
       ])}</section>
       <section class="card pad ov-side">${ovTabs([
-        { key: 'running', label: '进行中', n: running.length, html: `<section class="ov-sec"><div class="section-head"><h2>进行中</h2><button type="button" class="link" data-action="view" data-view="running">查看全部</button></div>${running.length ? `<div class="stack">${running.slice(0, 4).map(d => { const pr = progressOf(d); return `<button type="button" class="row focus-item" style="grid-template-columns:auto minmax(0,1fr)" data-action="open-task" data-id="${attr(d.task_id)}">${ring(pr.answered / Math.max(1, pr.expected), `${pr.answered}/${pr.expected}`)}<div class="min0"><strong class="truncate">${esc(titleOf(d))}</strong><span class="truncate">${esc(stallInfo(d).text)}</span></div></button>`; }).join('')}</div>` : empty('没有进行中的任务')}</section>` },
+        { key: 'running', label: '进行中', n: running.length, html: `<section class="ov-sec"><div class="section-head"><h2>进行中</h2><button type="button" class="link" data-action="view" data-view="running">查看全部</button></div>${running.length ? `<div class="stack">${running.slice(0, 4).map(d => { const pr = progressOf(d); return `<button type="button" class="row focus-item" style="grid-template-columns:auto minmax(0,1fr)" data-action="open-task" data-id="${attr(d.task_id)}">${ring(pr.answered / Math.max(1, pr.expected), `${pr.answered}/${pr.expected}`)}<div class="min0"><strong class="truncate">${esc(titleOf(d))}</strong><span class="truncate">${esc(stallInfo(d).text)}</span><div class="row wrap">${peerStateChips(pr.states)}</div></div></button>`; }).join('')}</div>` : empty('没有进行中的任务')}</section>` },
         { key: 'delivered', label: '最近交付', n: 0, html: `<section class="ov-sec"><div class="section-head"><h2>最近交付</h2><button type="button" class="link" data-action="view" data-view="artifacts">查看全部</button></div>${delivered.length ? `<div class="artifact-grid">${delivered.map(({ d }) => artifactCard(d, p, true)).join('')}</div>` : empty('还没有交付物', '采纳并登记交付物后显示')}</section>` },
         { key: 'recent', label: '最近定了', n: 0, html: `<section class="ov-sec"><div class="section-head"><h2>最近定了什么</h2><button type="button" class="link" data-action="view" data-view="decisions">查看全部</button></div>${recent.length ? `<div class="timeline">${recent.map(d => `<div class="tl ${STATUS_TONE[d.status] || ''}"><time>${esc(fmtDate(d.updated || d.created))} · ${esc(STATUS[d.status])}</time><button type="button" class="link" data-action="open-decision" data-id="${attr(d.task_id)}">${esc(titleOf(d))}</button>${d.summary ? `<div class="muted clamp" style="font-size:calc(12px * var(--fs-scale, 1))">${esc(d.summary)}</div>` : ''}</div>`).join('')}</div>` : empty('还没有完成的决策')}</section>` },
         { key: 'project', label: '项目', n: 0, html: `<section class="ov-sec"><div class="section-head"><h2>下一步</h2><button type="button" class="link" data-action="edit-plan">编辑计划</button></div>${next.length ? `<div class="stack" style="gap:6px">${next.map((item, i) => `<div class="row"><span class="avatar" style="width:22px;height:22px;font-size:calc(11px * var(--fs-scale, 1))">${i + 1}</span><span class="grow">${esc(item)}</span><button type="button" class="ghost small" data-action="plan" data-index="${i}" data-tip="交给 Leader 派发" aria-label="交给 Leader 派发：${attr(item)}">${icon('send')}</button></div>`).join('')}</div>` : empty('还没有下一步计划')}</section><section class="ov-sec"><div class="section-head"><h2>项目团队</h2><span class="row" style="gap:12px"><button type="button" class="link" data-action="edit-project" data-tip="默认团队、默认模式与上下文文件">项目配置</button><button type="button" class="link" data-action="edit-teams">编辑团队</button></span></div><div class="row wrap">${team.length ? team.map(n => `<span class="chip ${agentByName(n).online ? 'ok' : ''}">${esc(displayName(n))}</span>`).join('') : '<span class="muted">未设置团队，派发时取全部在线 Agent</span>'}</div><div class="muted" style="font-size:calc(12px * var(--fs-scale, 1));margin-top:8px">在线 ${teamOnline.length}/${team.length}</div></section><section class="ov-sec"><div class="section-head"><h2>备注</h2><span class="hint">点击文字，失焦保存</span></div><div class="inline-edit" contenteditable="true" data-inline="project" data-field="note" data-placeholder="记录一句当前判断…" data-keep data-keep-id="note:${attr(p.slug)}">${esc(latestNote)}</div></section>` },

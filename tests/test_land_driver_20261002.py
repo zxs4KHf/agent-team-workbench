@@ -37,7 +37,7 @@ class LandDriver(Base):
         self.p2 = mock.patch.object(B, "peer_group", lambda p: "opus"); self.p2.start()
         self.p3 = mock.patch.object(RA, "builder_groups", lambda: ["opus"]); self.p3.start()
         os.makedirs(os.path.join(P.PROJECTS, "p1"), exist_ok=True)
-        B.write_json(os.path.join(P.PROJECTS, "p1", "project.json"), {"slug": "p1", "name": "p1", "peers": [], "mode": "independent", "context_files": []})
+        B.write_json(os.path.join(P.PROJECTS, "p1", "project.json"), {"slug": "p1", "name": "p1", "repo_dir": self.repo, "peers": [], "mode": "independent", "context_files": []})
         B.write_json(os.path.join(P.PROJECTS, "p1", "decisions.json"), [])
 
     def tearDown(self):

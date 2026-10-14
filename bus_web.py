@@ -741,7 +741,7 @@ class Handler(BaseHTTPRequestHandler):
                                                 body.get("view", ""), body.get("target", ""), body.get("viewport", ""),
                                                 body.get("project", "")))
             if u.path == "/api/feedback/update":
-                return self.send_json(FB.update(str(body.get("id") or ""), str(body.get("status") or ""), str(body.get("note") or "")))
+                return self.send_json(FB.update(str(body.get("id") or ""), str(body.get("status") or ""), str(body.get("note") or ""), expect=str(body.get("expect") or ""), expect_command_id=str(body.get("expect_command_id") or "")))
             if u.path == "/api/plugins/toggle":
                 return self.send_json(PL.toggle(str(body.get("id") or ""), bool(body.get("enabled"))))
             if u.path == "/api/plugins/config":

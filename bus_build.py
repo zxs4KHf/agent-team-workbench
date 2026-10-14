@@ -284,7 +284,13 @@ def dispatch_review(task_id: str, teammate: str, ttl_min: int = 20, reviewers: l
     if same:
         pack = (f"> 注意：审查者（{', '.join(same)}）与施工者（{teammate}）同属模型组 {builder_group}。"
                 "同一模型的盲点相同，请刻意换角度：先跑测试和边界输入，再读实现；不要只顺着作者的思路看。\n\n") + pack
-    r = B.dispatch(by, reviewers, "review", pack, [], int(ttl_min), None, 1, review_of=target)
+    # 跨项目串台修复：审查单也带上被审任务的真实归属（project_for_task），下游 post 默认值不再靠 Leader 当下打开的项目猜
+    try:
+        import bus_projects as _BP
+        _proj = _BP.project_for_task(task_id)
+    except Exception:
+        _proj = ""
+    r = B.dispatch(by, reviewers, "review", pack, [], int(ttl_min), None, 1, review_of=target, project=_proj)
     return {"review_task": r["task_id"], "reviewers": list(reviewers), "deadline": r["deadline"], "task_id": task_id, "teammate": teammate}
 
 

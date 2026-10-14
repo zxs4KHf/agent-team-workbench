@@ -19,7 +19,8 @@
     // fetch 遇 4xx/5xx 不会 reject：先看 r.ok；带 error 或两项都没有也算失败（fable2 efe4）
     fetch('/api/ext/summary', { cache: 'no-store' }).then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); }).then(function (d) {
       if (!d || d.error) throw new Error('bad summary');
-      var pi = count(d.intake, 'pending'), fo = count(d.feedback, 'open');
+      var feedbackKey = d.feedback && typeof d.feedback === 'object' && !Array.isArray(d.feedback) && d.feedback.actionable !== undefined ? 'actionable' : 'open';
+      var pi = count(d.intake, 'pending'), fo = count(d.feedback, feedbackKey);
       if (pi === null && fo === null) throw new Error('bad summary');
       d = { intake: pi === null ? null : { pending: pi }, feedback: fo === null ? null : { open: fo } };  // 只广播校验过的数
       var n = (pi || 0) + (fo || 0);

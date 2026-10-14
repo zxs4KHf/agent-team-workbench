@@ -185,7 +185,7 @@ def rework(it: dict, by: str = "user") -> dict:
         raise ValueError("现在没有正在等任务的施工 Agent")
     rec = next((d for d in P.decisions(it["project"]) if d["task_id"] == it["task_id"]), {}) or {}
     ctx = [rec["merge_path"]] if rec.get("merge_path") else []
-    r = B.dispatch("controller", [target], "build", _rework_question(it, rec.get("title") or it["title"]), ctx, ttl_min=180)
+    r = B.dispatch("controller", [target], "build", _rework_question(it, rec.get("title") or it["title"]), ctx, ttl_min=180, project=it["project"], repo_dir=P.load_project(it["project"]).get("repo_dir") or "")
     try:
         BB.close(it["build_id"], remove_worktrees=False)
     except Exception:  # noqa: BLE001  旧单关不掉不挡新单：新单已经派出，决策改关联新单即可

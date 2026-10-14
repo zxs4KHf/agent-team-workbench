@@ -104,6 +104,9 @@
         if (short !== body && navigator.clipboard) navigator.clipboard.writeText(title + '\n\n' + body).catch(function () {});
         window.open('https://github.com/' + repo + '/issues/new?title=' + encodeURIComponent(title) + '&body=' + encodeURIComponent(short) + labels, '_blank', 'noopener');
         msg.className = 'wbfb-msg ok'; msg.textContent = '已打开 GitHub 新建 Issue 页面，登录后点「Submit new issue」即可；本机也会存一份。';
+        // 反馈 fb-abd29e3511：下一步动作已经在新标签页里，面板留着只会挡路，提示看过就收起（与「记到本机」一致）。
+        // 「复制内容」不加这句：用户还要回到本页面把剪贴板贴出去。
+        setTimeout(close, 1600);
       } else {
         var done = function () { msg.className = 'wbfb-msg ok'; msg.textContent = '已复制。可以贴到微信、邮件或群里发给作者；本机也会存一份。'; };
         if (navigator.clipboard) navigator.clipboard.writeText(title + '\n\n' + body).then(done, function () { msg.className = 'wbfb-msg err'; msg.textContent = '复制失败：浏览器不允许访问剪贴板，请手动选中文字复制'; });

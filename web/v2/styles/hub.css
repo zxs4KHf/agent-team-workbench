@@ -74,3 +74,6 @@ a.hub-btn{text-decoration:none}
 #hubLive i{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--faint)}
 #hubLive.ok i{background:var(--ok);box-shadow:0 0 0 3px var(--ok-soft)}
 #hubLive.bad i{background:var(--warn)}
+
+/* Keep keyboard focus visible when the narrow filter strip scrolls to an edge. */
+.hub-filter button:focus-visible{outline-offset:-2px}

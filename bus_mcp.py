@@ -211,19 +211,19 @@ async def bus_reply(task_id: str, peer: str, answer: str) -> str:
     "同一列表里显式点名的 peer 仍然照发，auto 只补选空闲的；自动挑选不到任何人时直接报错、任务不创建。"))
 async def bus_dispatch(peers: list[str], question: str, mode: str = "independent", context_files: list[str] | None = None,
                        from_peer: str = "main", ttl_min: int = 30, angles: bool | dict[str, str] | None = None,
-                       min_answers: int = 0, repo_dir: str = "", max_peers: int = 0, parent_task: str = "", intro: str = "") -> str:
+                       min_answers: int = 0, repo_dir: str = "", max_peers: int = 0, parent_task: str = "", intro: str = "", project: str = "") -> str:
     """peers: Agent名列表；列表里含 "auto" 时由总线自动挑选在线+空闲+手上没有未回复任务的 Agent（离线、时钟错乱、忙、正在代理 Leader、有积压的都会被排除并给出理由）。mode: discuss（只讨论，无写权限）/ build（每个Agent一棵 git worktree，回复自动 commit）/
     review（审查 diff，回复 PASS 或 RETURN）/ independent / redteam / relay。
     angles: true = 按内置九个切入角度轮流分给每个Agent；或 {Agent: 角度文字}；省略 = 同题同角度。
     min_answers: 到齐多少份回答就通知Leader合并（默认在线Agent过半数，至少 2；relay 为 1）。
-    repo_dir: build 模式的项目目录（默认工作区根），没有 git 仓库会自动初始化。
+    project: 已登记的归属项目；build 必须明确提供（或绑定父任务）。repo_dir 必须与该项目登记仓库一致；不会自动初始化仓库。
     max_peers: 配 auto 用，auto 最多补选几个 Agent（默认 2，至少 1；显式点名的人不占这个额度）。"""
     if mode not in ("discuss", "build", "review", "independent", "redteam", "relay"):
         return "ERROR: mode 只能是 discuss / build / review / independent / redteam / relay"
     return await _tool("dispatch", {"peers": peers, "question": question, "mode": mode, "context_files": context_files or [],
                                     "from_peer": from_peer, "ttl_min": max(1, min(int(ttl_min), 1440)), "angles": angles,
                                     "min_answers": int(min_answers or 0), "repo_dir": repo_dir or None,
-                                    "max_peers": int(max_peers or 0), "parent_task": parent_task or None, "intro": intro or None}, 90)
+                                    "max_peers": int(max_peers or 0), "parent_task": parent_task or None, "intro": intro or None, "project": project}, 90)
 
 
 @mcp.tool(name="bus_build", description=(

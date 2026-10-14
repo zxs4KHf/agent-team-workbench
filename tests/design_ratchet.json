@@ -1,9 +1,9 @@
 {
   "adr": "docs/adr/0011-frontend-refactor.md",
   "rule": "数只能降不能升。重构后跑 node tests/smoke_design_ratchet.mjs --update 收紧；升高要手改并在合入说明里写理由。",
-  "updated": "2026-10-08",
+  "updated": "2026-10-13",
   "limits": {
-    "inline_style": 218,
+    "inline_style": 216,
     "hardcoded_color": 41,
     "font_size_value": 14,
     "button_class": 30,

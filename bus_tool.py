@@ -21,7 +21,7 @@ def main():
     elif action == "dispatch":
         r = B.dispatch(a.get("from_peer", "main"), a["peers"], a.get("mode", "independent"), a["question"],
                        a.get("context_files", []), int(a.get("ttl_min", 30)), a.get("angles"), int(a.get("min_answers", 0)), a.get("repo_dir") or "",
-                       max_peers=int(a.get("max_peers") or 0), parent_task=a.get("parent_task") or "", intro=a.get("intro") or "")
+                       max_peers=int(a.get("max_peers") or 0), parent_task=a.get("parent_task") or "", intro=a.get("intro") or "", project=a.get("project") or "")
         lines = [f"task_id: {r['task_id']}", f"peers: {', '.join(r['peers'])}", f"deadline: {r['deadline']}", f"min_answers: {r['min_answers']}（到齐这么多份即通知合并）"]
         auto = r.get("auto")
         if auto:

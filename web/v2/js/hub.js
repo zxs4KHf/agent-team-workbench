@@ -8,10 +8,11 @@ const $ = (s, r = document) => r.querySelector(s);
 const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const KIND = { source: ['数据源', 'info'], notifier: ['通知', 'violet'], panel: ['页面', 'plain'] };
 const FB_KIND = { bug: ['出错了', 'bad'], ux: ['不好用', 'warn'], idea: ['想法', 'violet'] };
-const FB_STATUS = { open: '未处理', converted: '已转任务', done: '已解决', dismissed: '不处理' };
+const FB_STATUS = { open: '未处理', converted: '处理中', awaiting_verification: '待验证', deferred: '暂缓', done: '已解决', dismissed: '不处理' };
+const FB_ACTIONABLE = ['open', 'awaiting_verification', 'deferred'];
 const IN_STATUS = { pending: '待确认', accepted: '已转任务', dismissed: '已忽略' };
 
-const S = { tab: '', intake: [], feedback: [], plugins: [], events: [], projects: [], inFilter: 'pending', fbFilter: 'open', open: new Set(), logs: {} };
+const S = { tab: '', intake: [], feedback: [], plugins: [], events: [], projects: [], inFilter: 'pending', fbFilter: 'actionable', open: new Set(), logs: {} };
 
 async function api(path, body) {
   const r = await fetch(path, body === undefined ? { cache: 'no-store' } : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
@@ -51,7 +52,7 @@ async function loadProjects() {
 function counts() {
   const set = (k, n) => { const b = document.querySelector(`[data-count="${k}"]`); if (b) b.textContent = n ? String(n) : ''; };
   set('inbox', S.intake.filter(x => x.status === 'pending').length);
-  set('feedback', S.feedback.filter(x => x.status === 'open').length);
+  set('feedback', S.feedback.filter(x => FB_ACTIONABLE.includes(x.status)).length);
   set('plugins', S.plugins.filter(x => x.running).length);
 }
 
@@ -97,29 +98,27 @@ function renderInbox() {
 }
 
 function renderFeedback() {
-  const n = s => S.feedback.filter(x => x.status === s).length;
-  const list = S.feedback.filter(x => S.fbFilter === 'all' || x.status === S.fbFilter);
-  let html = `<div class="hub-bar">${filterBar(S.fbFilter, [['open', '未处理', n('open')], ['converted', '已转任务', n('converted')], ['done', '已解决', n('done')], ['dismissed', '不处理', n('dismissed')], ['all', '全部']], 'fb')}<span class="grow"></span></div>`;
-  if (!list.length) {
-    return html + `<div class="hub-empty"><strong>${S.fbFilter === 'open' ? '没有未处理的反馈' : '这里还没有反馈'}</strong>任何页面右下角都有「反馈」按钮（快捷键 <code>Alt+B</code>）。用着不顺手时点一下、写一句，系统会记下你当时在哪、点了什么。</div>`;
-  }
-  if (S.fbFilter === 'open') html += `<p class="hub-next">下一步：挑值得改的「转成任务」，Leader 会先复现、判断，再按分支流程改，改完回来标「已解决」并写提交编号。</p>`;
-  html += `<div class="hub-list">` + list.map(f => {
+  const n = state => state === 'actionable' ? S.feedback.filter(x => FB_ACTIONABLE.includes(x.status)).length : S.feedback.filter(x => x.status === state).length;
+  const list = S.feedback.filter(x => S.fbFilter === 'all' || (S.fbFilter === 'actionable' ? FB_ACTIONABLE.includes(x.status) : x.status === S.fbFilter));
+  const filters = [['actionable', '待处理', n('actionable')], ...Object.entries(FB_STATUS).map(([value, label]) => [value, label, n(value)]), ['all', '全部']];
+  let html = `<div class="hub-bar">${filterBar(S.fbFilter, filters, 'fb')}<span class="grow"></span></div>`;
+  html += `<p class="hub-next">派工只代表已安排；回执后仍需验证。结案请写验证依据，不处理请写理由；暂缓的问题仍保留在待处理区。</p>`;
+  if (!list.length) return html + `<div class="hub-empty"><strong>当前筛选没有反馈</strong>可切换筛选，或使用页面右下角「反馈」。</div>`;
+  return html + `<div class="hub-list">` + list.map(f => {
     const [kl, kc] = FB_KIND[f.kind] || ['反馈', 'plain'];
     const where = [f.view && '视图 ' + f.view, f.target && '点击 ' + f.target, f.page].filter(Boolean).join(' · ');
     const last = (f.history || []).slice(-1)[0];
+    const actions = f.status === 'done' || f.status === 'dismissed' ? [['open','重新打开']] : [
+      ...(['open','awaiting_verification','deferred'].includes(f.status) ? [['converted', f.status === 'open' ? '转成任务' : '继续派工']] : []),
+      ...(f.status !== 'deferred' ? [['deferred','暂缓']] : []), ['done','验证后结案'], ['dismissed','明确不做']];
     return `<article class="card hub-item" data-item="${esc(f.id)}">
-      <div class="hub-meta">${chip(kl, kc)}${f.status !== 'open' ? chip(FB_STATUS[f.status] || f.status, f.status === 'done' ? 'ok' : 'plain') : ''}<span>${esc(rel(f.created))}</span><span>${esc(f.id)}</span></div>
-      ${textBlock(f.id, f.text)}
-      ${where ? `<div class="hub-meta" style="margin-top:6px">${esc(where)}</div>` : ''}
-      ${last && last.note ? `<div class="hub-meta" style="margin-top:6px">备注：${esc(last.note)}</div>` : ''}
-      <div class="hub-actions"><input id="fn-${esc(f.id)}" placeholder="${f.status === 'open' ? '补充要求（可选）' : '备注（可选）'}" aria-label="备注"><span class="grow"></span>
-        ${f.status === 'open' ? `<button type="button" class="hub-btn quiet" data-act="fb" data-s="dismissed" data-id="${esc(f.id)}">不处理</button><button type="button" class="hub-btn" data-act="fb" data-s="done" data-id="${esc(f.id)}">已解决</button><button type="button" class="hub-btn go" data-act="fb" data-s="converted" data-id="${esc(f.id)}">转成任务</button>`
-        : f.status === 'converted' ? `<button type="button" class="hub-btn" data-act="fb" data-s="done" data-id="${esc(f.id)}">标为已解决</button>`
-          : `<button type="button" class="hub-btn quiet" data-act="fb" data-s="open" data-id="${esc(f.id)}">重新打开</button>`}
+      <div class="hub-meta">${chip(kl, kc)}${chip(FB_STATUS[f.status] || f.status, f.status === 'done' ? 'ok' : 'plain')}<span>${esc(rel(f.created))}</span><span>${esc(f.id)}</span></div>
+      ${textBlock(f.id, f.text)}${where ? `<div class="hub-meta">${esc(where)}</div>` : ''}
+      ${last && last.note ? `<div class="hub-meta">备注：${esc(last.note)}</div>` : ''}
+      <div class="hub-actions"><input id="fn-${esc(f.id)}" placeholder="结案填验证依据；不做填理由；其他操作可补充" aria-label="验证依据或说明"><span class="grow"></span>
+      ${actions.map(([state,label]) => `<button type="button" class="hub-btn" data-act="fb" data-s="${state}" data-id="${esc(f.id)}">${label}</button>`).join('')}
       </div></article>`;
   }).join('') + `</div>`;
-  return html;
 }
 
 function cfgValue(v) { return typeof v === 'string' ? v : JSON.stringify(v); }
@@ -194,8 +193,14 @@ document.addEventListener('click', async e => {
     }
     if (b.dataset.act === 'fb') {
       const status = b.dataset.s;
-      await leave(id, () => api('/api/feedback/update', { id, status, note: $(`#fn-${id}`)?.value || '' }));
-      toast({ converted: '已转成任务，Leader 会先复现再决定怎么改', done: '已标为解决', dismissed: '已标为不处理', open: '已重新打开' }[status]);
+      const current = S.feedback.find(x => x.id === id), note = ($(`#fn-${id}`)?.value || '').trim();
+      if (!current) throw new Error('反馈已变化，请刷新');
+      if (['done','dismissed'].includes(status) && note.length < 2) throw new Error('请先填写验证依据或不处理的明确理由');
+      await leave(id, async () => {
+        const updated = await api('/api/feedback/update', { id, status, note, expect: current.status, expect_command_id: current.command_id || '' });
+        if (updated.status !== status) throw new Error('反馈已被其他会话更新，请核对后再操作');
+      });
+      toast({ converted: '已派工，尚未解决', done: '已按填写的依据结案', dismissed: '已记录不处理的理由', deferred: '已暂缓，仍保留在待处理区', open: '已重新打开' }[status]);
       return load(['feedback', 'events']);
     }
     if (b.dataset.act === 'toggle') {

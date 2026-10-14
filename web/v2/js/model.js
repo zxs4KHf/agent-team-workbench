@@ -44,6 +44,8 @@ export const isUnbound = d => !!(d && d.warning && d.warning.code === 'ack_task_
 export const UNBOUND_HINT = '派发已完成，但面板未绑定任务，等待 Leader 修复';
 export const activeDecisions = (p = project()) => decisions(p).filter(d => (isUnbound(d) || !['archived', 'cancelled', 'superseded', 'rejected'].includes(d.status)) && !hiddenNow(d));
 export const runningDecisions = (p = project()) => activeDecisions(p).filter(d => ['dispatched', 'collecting', 'ready_for_merge'].includes(d.status));
+export const unboundTasks = (s = S()) => (Array.isArray(s.unbound) ? s.unbound : []);
+export const unboundCount = (s = S()) => unboundTasks(s).length;
 // 终态口径由服务端 /api/state 下发（bus_projects.TERMINAL_STATUSES 的同一份）；下面只是服务端缺席时的兜底
 export const TERMINAL_FALLBACK = ['merged', 'adopted', 'archived', 'cancelled', 'superseded', 'rejected'];
 export const terminalStatuses = (s = S()) => (Array.isArray(s.terminal_statuses) && s.terminal_statuses.length ? s.terminal_statuses : TERMINAL_FALLBACK);

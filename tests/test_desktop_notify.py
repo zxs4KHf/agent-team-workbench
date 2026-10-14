@@ -53,21 +53,23 @@ class DesktopNotify(unittest.TestCase):
 class MainLoop(unittest.TestCase):
     """主循环：首次 cursor=now 不补发历史；一批事件合成一条通知；工作台 5 分钟不可达自行退出。假时钟，不弹窗。"""
     def test_loop(self):
-        import json, os
+        import json, os, tempfile
+        state_dir = tempfile.TemporaryDirectory(prefix="notify-legacy-loop-")
+        self.addCleanup(state_dir.cleanup)
         from unittest import mock
         clock = [1000.0]; urls = []; toasts = []
-        seq = [{"events": [], "cursor": "c1"},
-               {"events": [ev("decision.merged", title="A", project="p"), ev("decision.dispatched", title="noise")], "cursor": "c2"},
-               {"events": [ev("decision.merged", title="B", project="p")], "cursor": "c3"}]
+        seq = [{"events": [], "cursor": "2026-10-13:1"},
+               {"events": [dict(ev("decision.merged", title="A", project="p"), id="a"), dict(ev("decision.dispatched", title="noise"), id="noise")], "cursor": "2026-10-13:2"},
+               {"events": [dict(ev("decision.merged", title="B", project="p"), id="b")], "cursor": "2026-10-13:3"}]
         def fake_get(url, timeout=10):
             urls.append(url)
             if seq: return seq.pop(0)
             raise OSError("down")
-        env = {"WORKBENCH_URL": "http://x", "WORKBENCH_PLUGIN_CONFIG": json.dumps({"batch_sec": 10, "poll_sec": 5, "max_per_hour": 5})}
-        with mock.patch.dict(os.environ, env), mock.patch.object(N, "get", fake_get), mock.patch.object(N, "toast", lambda t, b: toasts.append((t, b))), \
+        env = {"WORKBENCH_URL": "http://127.0.0.1:8765", "WORKBENCH_PLUGIN_DATA": state_dir.name, "WORKBENCH_PLUGIN_CONFIG": json.dumps({"batch_sec": 10, "poll_sec": 5, "max_per_hour": 5})}
+        with mock.patch.dict(os.environ, env), mock.patch.object(N, "get", fake_get), mock.patch.object(N, "toast", lambda t, b: toasts.append((t, b)) or True), \
              mock.patch.object(N.time, "time", lambda: clock[0]), mock.patch.object(N.time, "sleep", lambda s: clock.__setitem__(0, clock[0] + s)):
-            self.assertEqual(N.main(), 0)
-        self.assertIn("cursor=now", urls[0]); self.assertIn("cursor=c1", urls[1]); self.assertIn("cursor=c2", urls[2])
+            self.assertEqual(N.main([]), 0)
+        self.assertIn("cursor=now", urls[0]); self.assertIn("cursor=2026-10-13%3A1", urls[1]); self.assertIn("cursor=2026-10-13%3A2", urls[2])
         self.assertEqual(len(toasts), 1, toasts)
         self.assertEqual(toasts[0][0], "工作台 · 待你拍板 2"); self.assertNotIn("noise", toasts[0][1])
         self.assertGreater(clock[0] - 1000, 300, "持续不可达超过 5 分钟才退出")

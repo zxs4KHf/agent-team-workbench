@@ -18,7 +18,7 @@ def main():
     sp = ap.add_subparsers(dest="cmd", required=True)
     x = sp.add_parser("wait"); x.add_argument("--peer", required=True); x.add_argument("--model", default=""); x.add_argument("--timeout", type=int, default=590)
     x = sp.add_parser("reply"); x.add_argument("--peer", required=True); x.add_argument("--task", required=True); x.add_argument("--file", required=True, help="回答 Markdown 文件路径")
-    x = sp.add_parser("dispatch"); x.add_argument("--peers", required=True); x.add_argument("--mode", default="independent"); x.add_argument("--question", required=True); x.add_argument("--context", nargs="*", default=[])
+    x = sp.add_parser("dispatch"); x.add_argument("--peers", required=True); x.add_argument("--mode", default="independent"); x.add_argument("--question", required=True); x.add_argument("--context", nargs="*", default=[]); x.add_argument("--project", default=""); x.add_argument("--repo-dir", default="")
     x = sp.add_parser("collect"); x.add_argument("--task", required=True); x.add_argument("--timeout", type=int, default=590)
     x = sp.add_parser("status"); x.add_argument("--archive", default="")
     x = sp.add_parser("console_wait"); x.add_argument("--peer", required=True); x.add_argument("--timeout", type=int, default=30)
@@ -37,7 +37,7 @@ def main():
         with open(a.file, encoding="utf-8") as f:
             print(B.reply(a.task, a.peer, f.read()))
     elif a.cmd == "dispatch":
-        print(json.dumps(B.dispatch("cli", a.peers.split(","), a.mode, a.question, a.context), ensure_ascii=False, indent=2))
+        print(json.dumps(B.dispatch("cli", a.peers.split(","), a.mode, a.question, a.context, project=a.project, repo_dir=a.repo_dir), ensure_ascii=False, indent=2))
     elif a.cmd == "collect":
         r = B.collect(a.task, a.timeout)
         for peer, text in r["answers"].items():

@@ -1,6 +1,6 @@
 """体验反馈：本人在任何页面随手记下的问题或想法，是工作台「自我迭代」的入口。
 
-流程：记录（open）→ 转成 Leader 指令（converted）→ 处理完（done）或不处理（dismissed）。
+流程：记录→转任务→待验证或暂缓；有明确验证依据才解决，明确决定才不做。
 反馈只存在本机 feedback/ 目录，不入库。设计见 docs/adr/0004-feedback-loop.md。
 """
 import os
@@ -12,7 +12,8 @@ import bus_events as E
 from bus_locks import file_mutex
 
 FEEDBACK = os.path.join(B.ROOT, "feedback")
-STATUSES = ("open", "converted", "done", "dismissed")
+STATUSES = ("open", "converted", "awaiting_verification", "deferred", "done", "dismissed")
+ACTIONABLE = ("open", "awaiting_verification", "deferred")
 KINDS = ("bug", "ux", "idea")
 _ID = re.compile(r"^fb-[a-f0-9]{10}$")
 
@@ -60,6 +61,7 @@ def counts() -> dict:
     c = {s: 0 for s in STATUSES}
     for r in items(limit=100000):
         c[r.get("status", "open")] = c.get(r.get("status", "open"), 0) + 1
+    c["actionable"] = sum(c[state] for state in ACTIONABLE)
     return c
 
 
@@ -80,19 +82,29 @@ def update(fid: str, status: str, note: str = "", expect: str = "", expect_comma
             raise ValueError("没有找到该反馈")
         if (expect and rec.get("status") != expect) or (expect_command_id and rec.get("command_id") != expect_command_id):
             return rec
+        if rec.get("status") == status and status in ("done", "dismissed"):
+            return rec  # Repeated terminal confirmations do not duplicate evidence/history.
+        cleaned_note = _clean(note, 1000).strip()
+        if status in ("done", "dismissed") and len(cleaned_note) < 2:
+            raise ValueError("请填写验证依据或不处理的明确理由；指令回执不等于问题解决")
         if status == "converted":
-            if rec.get("status") != "open":
-                raise ValueError("只有未处理的反馈可以转成任务")
+            if rec.get("status") not in ACTIONABLE:
+                raise ValueError("只有未处理、待验证或暂缓的反馈可以继续派工")
             where = " / ".join(x for x in (rec.get("view"), rec.get("target")) if x)
             cmd = P.push_command("custom", {
                 "text": (f"【体验反馈 {fid}·{rec['kind']}】{rec['text']}\n位置：{where or '未记录'}\n"
                          f"要求：先复现并判断是否值得改；值得改就按 docs/WORKFLOW.md 走分支施工，完成后回执本指令 ok=true、result 写明提交编号"
-                         f"（反馈会自动标为已解决）；不值得改就回执 ok=false、result 写理由（自动标为不处理）。{('补充：' + _clean(note, 1000)) if note else ''}"),
+                         f"（反馈只进入待验证，不会自动解决）；本轮受阻或暂缓就回执 ok=false、result 写理由（只进入暂缓）。明确验证后再操作反馈结案并记录依据。{('补充：' + _clean(note, 1000)) if note else ''}"),
                 "feedback_id": fid, "project": rec.get("project", "")})
             rec["command_id"] = (cmd or {}).get("id", "")
         rec["history"] = (rec.get("history") or [])[-30:] + [{"at": B.now_iso(), "from": rec.get("status"), "to": status,
                                                               "note": _clean(note, 1000)}]
         rec["status"] = status
+        if status in ("done", "dismissed"):
+            rec["resolution"] = {"status": status, "note": cleaned_note, "at": B.now_iso(),
+                                 "command_id": rec.get("command_id", ""), "kind": "explicit-confirmation"}
+        elif status in ("open", "converted"):
+            rec.pop("resolution", None)
         B.write_json(_path(fid), rec)
     E.emit("feedback." + status, {"id": fid, "text": rec["text"][:200]}, subject=fid)
     return rec

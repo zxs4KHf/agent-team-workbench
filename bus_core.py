@@ -259,41 +259,51 @@ def valid_name(name: str) -> str:
     return name
 
 
-def heartbeat(peer: str, status: str = "idle", model: str = "", task_id: str = "", wait_started: str = "", wait_timeout: int = 0, role: str = "", session: str = "", label: str = ""):
+def heartbeat(peer: str, status: str = "idle", model: str = "", task_id: str = "", wait_started: str = "", wait_timeout: int = 0, role: str = "", session: str = "", label: str = "", temp=None):
     # 第二参语义已升格为 activity（idle/think/build/discuss），旧值 busy/relay 由 normalize_activity 归一。
     # role 与 activity 正交（relay = 代理 Leader），默认空表示没有附加角色。
     # session：多 Leader 并行接入时的会话标识（仅 controller 使用），逐会话记录，互不清除。
-    # 心跳写失败只跳过这一拍，不能中断 wait
+    # temp：过路调用者标记（fb-1b5ec6d4cf），None=保持原值。心跳写失败只跳过这一拍，不能中断 wait
     try:
-        _heartbeat(peer, status, model, task_id, wait_started, wait_timeout, role, session, label)
+        _heartbeat(peer, status, model, task_id, wait_started, wait_timeout, role, session, label, temp)
     except OSError:
         pass
 
 
 SESSION_TTL_SEC = 600  # 会话心跳超过此时长未更新即从 peers/<peer>.json 的 sessions 里清除
+TEMP_SESSION_TTL_SEC = 120  # fb-1b5ec6d4cf：过路调用者的临时会话（无显示名、未领指令）用更短的 TTL 清除
 
 
-def _merge_session(data: dict, session: str, activity: str, model: str, task_id: str, wait_started: str, wait_timeout: int, role: str, label: str = ""):
+def _merge_session(data: dict, session: str, activity: str, model: str, task_id: str, wait_started: str, wait_timeout: int, role: str, label: str = "", temp=None):
     """把一次会话心跳并入 data["sessions"]。多 Leader 并行接入时顶层字段只反映最近一拍，
-    各会话的独立状态记录在 sessions 里（在线判定不变：只看顶层 last_seen）。"""
+    各会话的独立状态记录在 sessions 里（在线判定不变：只看顶层 last_seen）。
+    temp：过路调用者标记（fb-1b5ec6d4cf）。None=保持原值；True=本次标为临时；False=转正（报了显示名）。
+    临时会话用 TEMP_SESSION_TTL_SEC 清除，不占 600 秒全量 TTL——sessions 不能因过路调用无限堆积。"""
     sessions = data.get("sessions") if isinstance(data.get("sessions"), dict) else {}
     prev = sessions.get(session) or {}
+    temp_flag = prev.get("temp", False) if temp is None else bool(temp)
+    if label:
+        temp_flag = False   # 报了显示名的就是真 Leader，临时标记即刻清除
     sessions[session] = {"session": session, "activity": activity, "last_seen": now_iso(), "task_id": task_id,
                          "model": model or prev.get("model", ""), "role": role if role in ROLES else "",
                          "wait_started": wait_started or prev.get("wait_started", ""),
                          "wait_timeout": wait_timeout or prev.get("wait_timeout", 0),
                          # 每位 Leader 自己的显示名（多活）：只写本会话，不再改顶层 label——顶层只有一份，新接入者会把别人的名字顶掉
                          "label": str(label or prev.get("label", ""))[:40],
-                         "joined": prev.get("joined") or now_iso()}
+                         "joined": prev.get("joined") or now_iso(),
+                         "temp": temp_flag}
     live = {}
     for sid, s in sessions.items():
         age, skewed = heartbeat_age(s.get("last_seen"))
-        if not skewed and age <= SESSION_TTL_SEC:
-            live[sid] = s
+        if skewed or age > SESSION_TTL_SEC:
+            continue
+        if s.get("temp") and age > TEMP_SESSION_TTL_SEC:
+            continue   # 临时会话短 TTL：过路调用者不留长痕
+        live[sid] = s
     data["sessions"] = live
 
 
-def _heartbeat(peer: str, status: str, model: str, task_id: str, wait_started: str, wait_timeout: int, role: str = "", session: str = "", label: str = ""):
+def _heartbeat(peer: str, status: str, model: str, task_id: str, wait_started: str, wait_timeout: int, role: str = "", session: str = "", label: str = "", temp=None):
     ensure_dirs()
     path = os.path.join(PEERS, f"{peer}.json")
     # 读-改-写必须与 set_label 互斥：否则改名与心跳并发时，后写的一方会用自己的旧快照覆盖对方
@@ -305,7 +315,7 @@ def _heartbeat(peer: str, status: str, model: str, task_id: str, wait_started: s
         data.update({"peer": peer, "status": legacy_status(activity), "activity": activity,
                      "role": role if role in ROLES else "", "last_seen": now_iso(), "task_id": task_id})
         if session:
-            _merge_session(data, session, activity, model, task_id, wait_started, wait_timeout, role, label)
+            _merge_session(data, session, activity, model, task_id, wait_started, wait_timeout, role, label, temp)
         if first:
             # 首次落盘：把首次连接前配置的 pending 显示名带上（纯显示字段，协议字段不变）
             lb = LN.pending_label(ROOT, peer)
@@ -567,24 +577,9 @@ def new_task_id() -> str:
 
 
 def resolve_context(paths: list) -> list:
-    """Use the same canonical workspace and credential boundary as ws_read."""
-    from pathlib import Path
-    import named_workspace_io as workspace_io
-    if paths is not None and not isinstance(paths, list):
-        raise ValueError('context_files must be a list')
-    if len(paths or []) > 64:
-        raise ValueError('At most 64 context files are allowed')
-    out, total = [], 0
-    for path in paths or []:
-        if not isinstance(path, str):
-            raise ValueError('Each context path must be text')
-        full, relative = workspace_io.resolve(Path(WORKSPACE), path)
-        raw = full.read_bytes()
-        total += len(raw)
-        if len(raw) > 2 * 1024 * 1024 or total > 8 * 1024 * 1024:
-            raise ValueError('Context exceeds the bounded text budget')
-        out.append({'path': relative.replace(chr(92), '/'), 'content': raw.decode('utf-8-sig')})
-    return out
+    """Read only bounded, selected and credential-checked references (ADR 0018)."""
+    from bus_context import collect_context
+    return collect_context(WORKSPACE, paths)
 
 
 def render_task(task: dict) -> str:
@@ -610,8 +605,9 @@ def render_task(task: dict) -> str:
         lines += ["## 你的切入角度", "", task["angle"], "", "只从这个角度作答，其他角度由别的Agent负责；同一个点别人会说的就不要写。", ""]
     if task.get("worktree"):
         lines += ["## 你的施工目录", "", f"`{task['worktree']}`（分支 `{task.get('branch', '')}`）。你的 ws_* 工具已经以这个目录为根，路径直接写相对路径。不要碰 `.wt/` 之外的其他Agent目录。", ""]
+    from bus_context import reference_lines
     for c in task.get("context", []):
-        lines += [f"## 上下文文件 `{c['path']}`", "", "```", c["content"].rstrip("\n"), "```", ""]
+        lines += reference_lines(c)
     lines += [
         "## 回复方式",
         "",
@@ -678,7 +674,44 @@ def auto_pick(exclude=(), max_peers: int = AUTO_MAX_PEERS) -> dict:
             "max_peers": n, "reasons": skipped}
 
 
+def _infer_project_for_peer(peer: str, parent_task: str = "") -> str:
+    """尝试判定 from_peer 的归属项目；判不出来返回空串。不瞎猜，不默认塞项目（体验反馈 fb-28bb2a1d9a）。"""
+    if parent_task:
+        try:
+            import bus_projects
+            p = bus_projects.project_for_task(parent_task)
+            if p:
+                return str(p).strip()
+        except Exception:
+            pass
+    p = str(peer or "").strip()
+    if not p:
+        return ""
+    rec = read_json(os.path.join(PEERS, f"{p}.json"), None)
+    if isinstance(rec, dict):
+        if rec.get("project"):
+            return str(rec["project"]).strip()
+        cur_tid = rec.get("task_id")
+        if cur_tid:
+            try:
+                import bus_projects
+                pr = bus_projects.project_for_task(cur_tid)
+                if pr:
+                    return str(pr).strip()
+            except Exception:
+                pass
+    return ""
+
+
 def dispatch(from_peer: str, peers: list, mode: str, question: str, context_files: list, ttl_min: int = 30, angles=None, min_answers: int = 0, repo_dir: str = "", review_of=None, parent_task: str = "", intro: str = "", *, max_peers: int = 0, race: bool = False, substitute: bool = True, external_owner: str = "", queue_until_claim: bool = False, project: str = "", team: str = "", plugin_request_id: str = "", task_id_override: str = "") -> dict:
+    from bus_context import check_text
+    check_text(question)
+    from bus_dispatch_scope import resolve as resolve_scope
+    normalized_parent = str(parent_task or '').strip()
+    if normalized_parent and not re.fullmatch(r'\d{8}-\d{6}-[0-9a-zA-Z]{2,12}', normalized_parent):
+        normalized_parent = ''
+    project, repo_dir, project_source = resolve_scope(mode, project, normalized_parent, repo_dir,
+                                                     lambda: _infer_project_for_peer(from_peer, normalized_parent))
     ensure_dirs()
     if mode not in MODES:
         raise ValueError(f"mode 只能是 {', '.join(MODES)}")
@@ -738,6 +771,8 @@ def dispatch(from_peer: str, peers: list, mode: str, question: str, context_file
             offline.append(peer)
         task = {"id": task_id, "from": from_peer, "to": peer, "mode": mode, "question": question, "angle": angles.get(peer, ""),
                 "context": context, "created": now_iso(), "deadline": deadline, "deadline_ts": deadline_ts}
+        if project:
+            task.update(project=project, project_source=project_source)
         if external_owner:
             task["external_owner"] = external_owner
         if queue_until_claim:
@@ -783,10 +818,17 @@ def dispatch(from_peer: str, peers: list, mode: str, question: str, context_file
         meta["parent_task"] = parent_task
     if intro:
         meta["intro"] = intro
+    # 归属项目判定（体验反馈 fb-28bb2a1d9a）：优先取调用方显式传入的 project；
+    # 取不到再尝试判定 from_peer 的归属；两者都判不出来留空。不瞎猜，不默认塞项目。
+    if project:
+        meta["project"] = project
+        meta["project_source"] = project_source
     if review_of is not None:
         meta["review_of"] = dict(review_of)   # 审查单绑定的被审对象也落 meta：「催审」据此判断是否已有人在审
     if auto:
         meta["auto"] = auto
+    if context:
+        meta['context_manifest'] = [{k: v for k, v in item.items() if k != 'content'} for item in context]
     write_json(os.path.join(OUTBOX, f"{task_id}.meta.json"), meta)
     result = {"task_id": task_id, "peers": list(peers), "offline": offline, "deadline": deadline, "min_answers": min_answers, "substituted": swaps}
     if auto:
@@ -2284,7 +2326,7 @@ def redispatch(task_id: str, from_peer: str = "controller", peers: list = None, 
             rel = os.path.relpath(os.path.join(OUTBOX, f"{task_id}.{p}.md"), WORKSPACE).replace(os.sep, "/")
             if rel not in ctx and not rel.startswith(".."):
                 ctx.append(rel)
-    res = dispatch(from_peer, new_peers, m, q, ctx, ttl_min=ttl_min, min_answers=quorum)
+    res = dispatch(from_peer, new_peers, m, q, ctx, ttl_min=ttl_min, min_answers=quorum, project=str(meta.get("project") or ""))
     new_meta = read_json(os.path.join(OUTBOX, f"{res['task_id']}.meta.json"), {}) or {}
     new_meta["redispatched_from"] = task_id
     new_meta["redispatch_opts"] = {"only_pending": bool(only_pending), "min_answers": quorum, "carry_answers": bool(carry_answers)}

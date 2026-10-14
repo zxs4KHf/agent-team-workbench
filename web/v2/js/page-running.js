@@ -1,7 +1,7 @@
 // page-running.js：从 views.js 拆出（ADR 0015，按页面拆模块；scripts/split_module.py 生成，函数体未改）
 // 视图：概览、进行中、决策、成果
 import { esc, attr, icon, sparkline, ring, fmtDate, relTime, minutesSince } from './core.js';
-import { S, F, project, decisions, activeDecisions, isUnbound, UNBOUND_HINT, runningDecisions, doneDecisions, agentList, onlineAgents, agentByName, projectPeers, displayName, titleOf, displayTitle, bucketOf, BUCKETS, threadsOf, childrenOf, artifactsOf, deliveredDecisions, weekDelivered, progressOf, stallInfo, countPending, STATUS, STATUS_TONE, EXEC_LABEL, PEER_STATE, ARTIFACT_KIND, orderedTasks, taskTier } from './model.js';
+import { S, F, project, decisions, activeDecisions, isUnbound, UNBOUND_HINT, runningDecisions, unboundTasks, doneDecisions, agentList, onlineAgents, agentByName, projectPeers, displayName, titleOf, displayTitle, bucketOf, BUCKETS, threadsOf, childrenOf, artifactsOf, deliveredDecisions, weekDelivered, progressOf, stallInfo, countPending, STATUS, STATUS_TONE, EXEC_LABEL, PEER_STATE, ARTIFACT_KIND, orderedTasks, taskTier } from './model.js';
 
 import { capped, chip, empty, head } from './views.js';
 import { modeLabel } from './views2.js';
@@ -45,6 +45,39 @@ function taskStall(d, pr = progressOf(d)) {
   return { terminal, tone: terminal ? 'warn' : 'muted', text: externalTaskStatus(pr) };
 }
 
+function unboundRow(u) {
+  const peers = (u.peers || []).map(p => displayName(p)).join('、') || '未指定';
+  const sub = [
+    `<span class="mono">${esc(u.task_id)}</span>`,
+    esc(u.mode || 'independent'),
+    `派发人：${esc(displayName(u.from || '未知'))}`,
+    `执行：${esc(peers)}`,
+    `<time data-reltime="${attr(u.created || '')}">${esc(relTime(u.created))}</time>`
+  ].join(' · ');
+  const statusInfo = u.build_status ? `施工：${esc(u.build_status)}` : `${u.answers_count || 0} 份回答`;
+  return `<article class="task" data-key="${attr(u.task_id)}">
+    <div class="task-main" data-action="open-task" data-id="${attr(u.task_id)}" role="button" tabindex="0">
+      <div class="min0"><h3 class="truncate">${esc(u.question || u.task_id)}</h3><p class="truncate">${sub}</p></div>
+      <div class="mid"><span class="chip warn">未归属项目</span></div>
+      <div class="mid"><span class="chip plain">${esc(statusInfo)}</span></div>
+      <div class="row"><button type="button" class="small" data-action="open-task" data-id="${attr(u.task_id)}">查看回答</button></div>
+    </div>
+  </article>`;
+}
+
+function unboundSectionHtml(unb) {
+  if (!unb || !unb.length) return '';
+  return `<div class="unbound-tasks-block" data-key="unbound-tasks">
+    <div class="section-head">
+      <h3>未归属任务</h3>
+      <span class="hint">直派或外部派发、未关联到当前项目的任务 (${unb.length})</span>
+    </div>
+    <div class="stack" id="unboundList">
+      ${capped('unbound', unb, unboundRow, 10)}
+    </div>
+  </div>`;
+}
+
 export function renderRunning(p) {
   const data = runningData(p), { all, list, stalled } = data, stuckOnly = !!F.filters.runningStuck, m = metaOf(data);  // 只算一遍（fable2 0c0f）
   const regularStalled = stalled.filter(d => !externalTaskInfo(d, progressOf(d).meta));
@@ -57,10 +90,13 @@ export function renderRunning(p) {
   // 一键清掉「全员过期、一份没交」的任务（2026-10-02 用户：「没办法把已过期的给清掉」）
   const deadN = all.filter(d => !externalTaskInfo(d, progressOf(d).meta) && stallInfo(d).terminal && !progressOf(d).answered).length;
   const clearDead = deadN ? `<button type="button" class="small danger" data-action="clear-expired">${icon('trash')}清理已过期 ${deadN}</button>` : '';
+  const unb = unboundTasks();
+  const unbHtml = unb.length ? unboundSectionHtml(unb) : '';
   return `<div class="view">${head('任务队列', '进行中', '每个任务一行，卡住原因写在行上，点开看每个 Agent 的状态。拖动行首 ⋮⋮ 调整处理顺序，前三位标 P0 / P1 / P2。', clearDead + reviewAll)}
     ${regularStalled.length ? `<div class="banner" style="background:var(--surface-2)">${icon('info')}<span>${regularStalled.length} 个任务有名额长期未回：守护会自动改派或摘掉；也可以直接点「现在合并」或「取消」，点完即从这里移除</span></div>` : ''}
     <section class="card fit-panel" data-key="fit-running"><div class="filters fit-head"><div class="search">${icon('search')}<input type="search" placeholder="搜索标题或任务号…" value="${attr(F.filters.running)}" data-filter="running" aria-label="搜索进行中任务" autocomplete="off"></div>${stuckChip}<span class="result-count" id="runningCount">${m.count}</span></div>
-    <div class="fit-body">${list.length ? `<div class="stack" id="taskList">${taskListHtml(p, list)}</div>` : empty(all.length ? (stuckOnly && !F.filters.running.trim() ? '没有卡住的任务' : '没有匹配的任务') : '没有进行中的任务', all.length ? (stuckOnly ? '再点一次「只看卡住」取消筛选' : '换个关键词') : '从「发起」创建一轮独立作答、redteam 或 relay')}</div></section>
+    <div class="fit-body">${list.length ? `<div class="stack" id="taskList">${taskListHtml(p, list)}</div>` : empty(all.length ? (stuckOnly && !F.filters.running.trim() ? '没有卡住的任务' : '没有匹配的任务') : '没有进行中的任务', all.length ? (stuckOnly ? '再点一次「只看卡住」取消筛选' : '换个关键词') : '从「发起」创建一轮独立作答、redteam 或 relay')}
+    ${unbHtml}</div></section>
   </div>`;
 }
 // 单独导出任务行：调度顺序或租约变化时只 morph 这个容器（app.js renderScoped）
