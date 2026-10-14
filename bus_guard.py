@@ -168,33 +168,39 @@ def token_readable() -> bool:
         return False
 
 
+def replica_instances() -> list:
+    from bus_guard_process import find_instances
+    return find_instances(CF_EXE, CF_TOKEN)
+
+
 def replica_alive() -> tuple:
     if not token_readable():
-        return None, 0, "等待授权：请以管理员运行 tools/grant_admin.bat"
-    # 用户态第二个 connector：与系统服务共用同一隧道 token，Cloudflare 侧自动在两个 connector 间分流；
-    # 系统服务挂了（守护无管理员权限拉不起来）时，公网入口仍由本副本承担
+        return None, 0, "Tunnel configuration is not readable; no restart attempted"
     try:
-        pid = int(open(CF_PID).read().strip())
-        out = subprocess.run(["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"], capture_output=True, timeout=15, creationflags=0x08000000).stdout.decode("utf-8", "replace")
-        ok = f'"{pid}"' in out and "cloudflared" in out.lower()
-        return ok, 0, "" if ok else "replica not running"
-    except Exception as exc:
-        return False, 0, str(exc)[:120]
+        pids = replica_instances()
+        detail = "Multiple matching replicas exist; no automatic cleanup" if len(pids) > 1 else ""
+        return bool(pids), 0, detail if pids else "replica not running"
+    except Exception:
+        # Unknown process state must never trigger an unconditional new launch.
+        return None, 0, "Process identity unavailable; automatic start deferred"
 
 
 def start_replica():
-    try:
-        with open(CF_TOKEN, "rb") as fh:
-            fh.read(1)
-    except OSError as exc:
-        # 未授权前不反复拉起：在服务卡片上给出明确指引
-        return f"token 不可读（需运行一次 tools/grant_admin.bat 授权）: {str(exc)[:60]}"
-    if not os.path.exists(CF_EXE):
-        return "cloudflared exe missing"
-    pid = spawn([CF_EXE, "tunnel", "--no-autoupdate", "run", "--token-file", CF_TOKEN], HERE, "cloudflared_replica.log")
-    with open(CF_PID, "w", encoding="utf-8") as fh:
-        fh.write(str(pid))
-    return pid
+    from bus_locks import file_mutex, atomic_write_json
+    if not token_readable():
+        return "Tunnel configuration is not readable; no process started"
+    if not os.path.isfile(CF_EXE):
+        return "cloudflared executable missing"
+    with file_mutex(CF_PID + ".mutex"):
+        pids = replica_instances()
+        if pids:
+            # Discover by identity even after PID-file loss or a prior write failure.
+            # Preserve pre-existing duplicates; do not kill any tunnel here.
+            atomic_write_json(CF_PID, pids[0])
+            return "ALREADY_RUNNING " + str(pids[0]) + ("; duplicates require separate review" if len(pids) > 1 else "")
+        pid = spawn([CF_EXE, "tunnel", "--no-autoupdate", "run", "--token-file", CF_TOKEN], HERE, "cloudflared_replica.log")
+        atomic_write_json(CF_PID, pid)
+        return pid
 
 
 def keepalive_alive() -> tuple:

@@ -16,3 +16,9 @@
 | `tests/ui_dispatch_confirm_44f1.py` | 2026-10-02 全量跑时一次失败（64 秒）；单独复跑本分支两次、main 一次均通过 | [推断] 与其它浏览器测试同因：全量跑时负载高。[已验证] 2026-10-02 新 runner 抓到一次：首屏 `wait_for_selector("#question")` 10 秒超时，复跑通过 | 待查：卡在首屏渲染（发起页表单），不是派发确认逻辑 |
 | `tests/ui_lead_label_3e32.py` | 2026-10-02 全量跑时两种现象：等 `#leadEvents .lead-event` 10 秒超时；或页面 console 多一条 `ERR_CONNECTION_REFUSED`。单跑 main 2/2 通过、拆分分支 1/2 | [推断] 机器负载高（同时有十几个 Agent 在跑，CPU 68%）时首屏 / SSE 重连慢；[已验证] 拆分前后首屏都在 0.4 秒左右，线上旧版本 4 次里也有 1 次 30 秒没出首屏 | 待查：console 那条是测试服务器关闭后 SSE 重连打到已关端口，可考虑测试里过滤关服后的报错 |
 | `tests/test_plugin_proxy_20261002.py`「test_http_forwarding」 | 2026-10-11 全量跑（134/135）失败：`502 != 503`（期望插件上游下线时返回 503 plugin_down，实得 502）；main 上单跑复现同一断言 | [已验证] 与本机代理环境变量有关：宿主机设置了 `http_proxy/https_proxy=http://127.0.0.1:55125` 且**未设 `no_proxy`**，`bus_web.py:459` 用 urllib 访问插件上游（127.0.0.1）时被代理接管，代理对已关闭的上游返回 502，于是走不到 `URLError/OSError` 的 503 分支。对照实验：加 `no_proxy=127.0.0.1,localhost` 后同一测试**通过 1/1（5s）**。全仓源码里没有 502 这条路径（另见 plugins/arena 的 502 与本测试无关） | 待查/环境相关：非仓库缺陷，换到无代理环境应通过；本机复跑请先 `no_proxy=127.0.0.1,localhost` |
+
+## 2026-10-14：Leader 事件排序用例的全局租约耦合（修复候选）
+
+`tests/test_lead_events_2c14.py::TestUnstable::test_open_sorted_newest_first` 创建临时事件目录，但 `lead_events_open()` 仍读取全局 `B.lease()`。当其它测试留下 epoch=2 的租约时，旧日期的 epoch=1 事件被已恢复通知过滤，从预期的 b,d,a 变成 b,d。新导出候选与发布基线的此用例及实现完全一致；注入同样的虚构租约，新旧各3次均复现。此证据证明环境耦合，不声称已经追溯最初那个租约的写入进程。
+
+修复仅在该测试文件的基础夹具里明确注入空租约，不读主工作区租约，原排序/计数/持久化断言不变。已恢复通知规则仍由 `test_lead_events_quiet_20261003.py` 的显式租约夹具覆盖。没有删除断言、增加超时或把失败测试加入跳过列表；需以组合候选完整回归与独立审查决定是否过门禁。

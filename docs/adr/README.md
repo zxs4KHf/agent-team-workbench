@@ -28,3 +28,9 @@
 新增时复制任一篇改写，编号递增，不修改已采纳的旧 ADR（被替代时在旧文里写"已被 NNNN 替代"）。
 
 - [0020 本机首次施工仓库绑定](0020-local-initial-repository-binding.md)：只读预演、明确确认、状态校验和原子回执；不开放普通项目更新权限。
+
+- [0021 自动施工提交的源码范围](0021-source-only-automatic-submission.md)：检查暂存/工作区和中间提交，拒绝私有运行路径。
+- [0022 隧道副本启动去重](0022-tunnel-replica-start-deduplication.md)：按完整进程身份匹配，未知状态不盲目拉起。
+- [0023 施工提交失败不得归档](0023-build-submission-failure-is-not-an-answer.md)：保留领取与私有草稿，修复后可重试。
+
+- [0024 固定提交公开快照](0024-fixed-public-snapshot.md)：隔离快照与隐私扫描，不读取工作区正文，不携带开发历史。

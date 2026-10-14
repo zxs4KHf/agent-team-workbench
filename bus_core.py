@@ -1960,10 +1960,22 @@ def reply(task_id: str, peer: str, answer: str) -> str:
         import bus_build as BB
         try:
             t = BB.commit_work(task_id, peer, answer.strip().splitlines()[0] if answer.strip() else "build")
+            if not isinstance(t, dict) or not t.get("commit"):
+                raise ValueError("Build submission did not produce a commit record")
             g = t.get("gates", {})
             header += f"- 提交：{t.get('commit', '')[:10]}\n- 改动文件：{', '.join(t.get('changed_files', [])) or '无'}\n- 门禁：{'通过' if g.get('ok', True) else '失败'}\n\n"
         except Exception as exc:
-            header += f"- 提交失败：{exc}\n\n"
+            # Failed staging/commit is not an answer. Keep the claim for retry;
+            # drafts live outside OUTBOX, so progress readers cannot count them.
+            draft_id = uuid.uuid4().hex
+            try:
+                write_json(os.path.join(LOG, "submission-failures", draft_id + ".json"),
+                           {"task_id": task_id, "peer": peer, "at": now_iso(),
+                            "error_type": type(exc).__name__, "answer_draft": answer})
+            except Exception:
+                raise ValueError("Build submission failed and draft could not be saved; task claim retained") from None
+            raise ValueError("Build submission failed; task claim retained for retry. "
+                             "Inspect Git status and local submission draft " + draft_id) from None
     if task.get("mode") == "review":
         first = (answer.strip().splitlines() or [""])[0].strip().upper()
         verdict = "PASS" if first.startswith("PASS") else "RETURN" if first.startswith("RETURN") else ""

@@ -38,19 +38,11 @@ def repo_root(path: str) -> str:
 
 
 def ensure_repo(path: str) -> str:
-    # 项目目录没有 git 仓库时就地初始化，保证任何目录都能进入施工流程
+    # A build may use an existing repository, never silently initialize a folder.
     top = repo_root(path)
-    if top:
-        return top
-    git(path, "init", "-b", "main")
-    git(path, "config", "user.name", "workbench")
-    git(path, "config", "user.email", "workbench@localhost")
-    gi = os.path.join(path, ".gitignore")
-    if not os.path.exists(gi):
-        open(gi, "w", encoding="utf-8", newline="\n").write(".wt/\n__pycache__/\nnode_modules/\n")
-    git(path, "add", "-A")
-    git(path, "commit", "-m", "workbench: initial snapshot", "--allow-empty")
-    return path
+    if not top:
+        raise ValueError('Build requires an existing Git repository; nothing was initialized')
+    return top
 
 
 def safe_branch(task_id: str, teammate: str) -> str:
@@ -151,20 +143,20 @@ def teammate_root(teammate: str) -> str:
 
 
 def commit_work(task_id: str, teammate: str, message: str) -> dict:
-    # Agent回复时调用：把 worktree 里的全部改动提交；没有改动也允许（讨论型回复）
+    # Validate the exact source path set before automatic staging; no blanket add.
     rec = record(task_id)
     t = (rec.get("teammates") or {}).get(teammate)
     if not t:
         return {}
     path = t["path"]
-    git(path, "add", "-A")
-    status = git(path, "status", "--porcelain").strip()
-    if status:
-        git(path, "-c", "user.name=" + teammate, "-c", "user.email=" + teammate + "@workbench", "commit", "-m", f"{task_id} {teammate}: {message[:72]}")
-    t["commit"] = git(path, "rev-parse", "HEAD").strip()
+    import bus_submission_scope as scope
+    staged = scope.stage_source_changes(path, rec["base"])
+    if staged:
+        scope._git(path, "-c", "user.name=" + teammate, "-c", "user.email=" + teammate + "@workbench", "commit", "-m", f"{task_id} {teammate}: {message[:72]}")
+    t["commit"] = scope._git(path, "rev-parse", "HEAD").decode("utf-8").strip()
     # 以 base..HEAD 的差异为准：builder 常在 worktree 内自行 commit，此时 status 为空，旧写法会让门禁全部跳过（「无需门禁」→ Reviewer 必 RETURN）
-    t["changed_files"] = [l.strip() for l in git(path, "diff", "--name-only", rec["base"], t["commit"]).splitlines() if l.strip()] or ([l[3:] for l in status.splitlines()] if status else [])
-    t["diffstat"] = git(path, "diff", "--stat", rec["base"], t["commit"]).strip()[-2000:]
+    t["changed_files"] = scope.changed_paths(path, rec["base"], t["commit"])
+    t["diffstat"] = scope._git(path, "diff", "--stat", rec["base"], t["commit"]).decode("utf-8", "replace").strip()[-2000:]
     # 返工点 7（commit_unbound）：讨论型回复允许零改动，但那时 HEAD 还停在任务基线上。
     # 「提交号 = 基线」不能当被审对象：PASS 绑上去等于给一份没动过的代码背书。
     t["commit_unbound"] = bool(t["commit"]) and t["commit"] == rec["base"] and not t["changed_files"]

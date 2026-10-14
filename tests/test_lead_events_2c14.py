@@ -5,12 +5,19 @@ import json, os, shutil, sys, tempfile, threading, unittest
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
 import bus_lead_notify as LN
+import bus_core as B
+from unittest import mock
 
 
 class Base(unittest.TestCase):
     def setUp(self):
         self.root = tempfile.mkdtemp(prefix="ev2c14-")
         os.makedirs(os.path.join(self.root, "console"))
+        # Event fixtures must not inherit a live lease from the repository being tested.
+        # Resolved-notice behavior has its own explicit lease fixtures in the quiet suite.
+        lease = mock.patch.object(B, "lease", return_value={})
+        lease.start()
+        self.addCleanup(lease.stop)
 
     def tearDown(self):
         shutil.rmtree(self.root, ignore_errors=True)
