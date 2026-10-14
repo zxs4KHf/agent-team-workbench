@@ -8,9 +8,10 @@ from pathlib import Path, PurePosixPath
 import subprocess
 
 RUNTIME_ROOTS = frozenset(('log','logs','console','peers','projects','outbox','inbox',
-                          'events','feedback','intake','attachments','local-data'))
+                          'events','feedback','intake','attachments','local-data','profiles','tmp'))
 PRIVATE_PARTS = frozenset(('.runtime','.scratch','.wt','.git','.ssh','.private',
-                          'node_modules','__pycache__','browser-profile','collected'))
+                          'node_modules','__pycache__','browser-profile','collected',
+                          '.workbench-locks','.workbuddy'))
 PRIVATE_NAMES = frozenset((
     'auth.json', 'cookies.json', 'cookies.txt',
     'credentials.json', 'id_ed25519', 'id_rsa',
@@ -50,6 +51,9 @@ def _protected(path):
     if not parts or p.is_absolute() or '..' in parts or '\\' in path or any(ord(c)<32 for c in path):
         return True
     return (parts[0] in RUNTIME_ROOTS or any(x in PRIVATE_PARTS for x in parts)
+            or path.lower().startswith(('arena/data/','arena/leader/','plugins/arena/server/data/'))
+            or (parts[0]=='adapters' and name.endswith('.state.json'))
+            or name.endswith(('.mutex','.bak')) or '.bak-' in name
             or name in PRIVATE_NAMES or name.endswith(('.pem','.key','.p12','.pfx','.db','.sqlite','.sqlite3','.log'))
             or (name.startswith('.env') and not name.endswith(('.example','.template')))
             or name.endswith('.local.json') or name.endswith('.local.toml'))
