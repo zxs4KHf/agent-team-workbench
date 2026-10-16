@@ -216,16 +216,35 @@ class PureGuidance(unittest.TestCase):
 
     def test_evidence_resolution_error_is_diagnostic_not_a_render_failure(self):
         with tempfile.TemporaryDirectory() as d:
-            root=Path(d);target=root/'tests/test_fixture.py';target.parent.mkdir();target.write_text('pass')
+            # The selector canonicalizes source_root first. Windows temporary
+            # paths can use an 8.3 alias, so match the canonical evidence path.
+            root=Path(d).resolve();target=root/'tests/test_fixture.py'
+            target.parent.mkdir();target.write_text('pass')
             catalog=root/'catalog.json';catalog.write_text(json.dumps({'schema':1,'lessons':[
                 {'id':'fixture','status':'accepted','paths':['*'],'summary':'Check inputs','evidence':['tests/test_fixture.py']}]}))
+            alias=root/'normalization-probe';alias.mkdir()
+            alias_root=alias/'..'
+            self.assertNotEqual(alias_root,root)
+            self.assertEqual(alias_root.resolve(),root)
             original=Path.resolve
-            def fail_evidence(path,*args,**kwargs):
-                if path==target:raise PermissionError('simulated inaccessible evidence')
-                return original(path,*args,**kwargs)
-            with mock.patch.object(Path,'resolve',fail_evidence):
-                result=R.select_lessons(catalog,root,['app.py'])
-            self.assertEqual(result['lessons'],[]);self.assertEqual(result['rejected_entries'],1)
+            for source_root in (Path(d),alias_root):
+                with self.subTest(root_spelling=str(source_root)):
+                    selected=R.select_lessons(source_root/'catalog.json',source_root,['app.py'])
+                    self.assertEqual([item['id'] for item in selected['lessons']],['fixture'])
+                    self.assertEqual(selected['rejected_entries'],0)
+                    injected=[]
+                    def fail_evidence(path,*args,**kwargs):
+                        if path==target:
+                            injected.append(path)
+                            raise PermissionError('simulated inaccessible evidence')
+                        return original(path,*args,**kwargs)
+                    with mock.patch.object(Path,'resolve',fail_evidence):
+                        result=R.select_lessons(source_root/'catalog.json',source_root,['app.py'])
+                    self.assertEqual(injected,[target])
+                    self.assertEqual(result['status'],'ok')
+                    self.assertEqual(result['lessons'],[])
+                    self.assertEqual(result['rejected_entries'],1)
+                    self.assertFalse(result['evidence_executed'])
 
     def test_invalid_catalog_root_is_unavailable(self):
         with mock.patch.object(Path,'resolve',side_effect=RuntimeError('simulated link loop')):
