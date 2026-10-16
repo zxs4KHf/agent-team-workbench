@@ -605,6 +605,9 @@ def render_task(task: dict) -> str:
         lines += ["## 你的切入角度", "", task["angle"], "", "只从这个角度作答，其他角度由别的Agent负责；同一个点别人会说的就不要写。", ""]
     if task.get("worktree"):
         lines += ["## 你的施工目录", "", f"`{task['worktree']}`（分支 `{task.get('branch', '')}`）。你的 ws_* 工具已经以这个目录为根，路径直接写相对路径。不要碰 `.wt/` 之外的其他Agent目录。", ""]
+    if task.get("mode") == "build":
+        from bus_review_context import builder_guidance
+        lines += [builder_guidance(task, ROOT), ""]
     from bus_context import reference_lines
     for c in task.get("context", []):
         lines += reference_lines(c)
@@ -748,7 +751,9 @@ def dispatch(from_peer: str, peers: list, mode: str, question: str, context_file
         import bus_build as BB
         swaps_pre = substitute_offline(list(peers)) if substitute else {}
         builders = [swaps_pre.get(p, p) for p in peers]
-        build_rec = BB.open_worktrees(task_id, builders, repo_dir or WORKSPACE)
+        from bus_review_context import freeze_brief
+        brief = freeze_brief(question, context, project=project, parent_task=parent_task)
+        build_rec = BB.open_worktrees(task_id, builders, repo_dir or WORKSPACE, review_brief=brief)
     deadline, deadline_ts = ("", 0) if queue_until_claim else deadline_after(ttl_min)
     offline = []
     # angles：dict 指定每个 peer 的切入角度；True 则按 ANGLES 轮流分配；None 不分配

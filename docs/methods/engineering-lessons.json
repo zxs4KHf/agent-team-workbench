@@ -1,0 +1,54 @@
+{
+  "schema": 1,
+  "maintenance": "Curated source-controlled guidance. Changes require the normal branch/test/review workflow; no model response is automatically promoted. Evidence identifies regression tests, not this run's result.",
+  "lessons": [
+    {
+      "id": "exact-commit-review",
+      "status": "accepted",
+      "paths": ["bus_build.py", "bus_build_safety.py", "bus_review_context.py"],
+      "summary": "Review the exact submitted commit, not a branch name. Plan coverage and actual code quality are different checks. A prior PASS, author summary or successful tool invocation cannot authorize a changed commit. Inspect truncated or unavailable evidence before deciding.",
+      "evidence": ["tests/test_verified_build_e2e.py"],
+      "origin": "Existing verified build lifecycle; PR 10 baseline. Humanize inspired structured delivery of this lesson, not its code."
+    },
+    {
+      "id": "submission-preserves-failure",
+      "status": "accepted",
+      "paths": ["bus_core.py", "bus_build.py", "bus_submission_scope.py"],
+      "summary": "A failed or unbound submission must not become a successful answer. Preserve the task claim and a recoverable local draft. Test an actual rejected Git submission followed by a corrected retry; do not merely mock a success response.",
+      "evidence": ["tests/test_build_reply_retry_20261014.py", "tests/test_submission_export_pipeline_20261014.py"],
+      "origin": "ADR 0023; verified reliability release."
+    },
+    {
+      "id": "all-submission-states",
+      "status": "accepted",
+      "paths": ["bus_submission_scope.py", "bus_build.py", "scripts/public_snapshot.py"],
+      "summary": "Check untracked, pre-staged, working-tree and intermediate/merge history states. A later deletion cannot erase a private file from outgoing Git history. Runtime paths nested inside source-looking plugin directories remain runtime data. Rejection must preserve the original index and files.",
+      "evidence": ["tests/test_submission_scope_20261014.py", "tests/test_runtime_submission_boundary_20261014.py", "tests/test_auth_path_policy_20261014.py"],
+      "origin": "ADR 0021 and PR 10 independent RETURN/fix/PASS cycle."
+    },
+    {
+      "id": "immutable-public-snapshot",
+      "status": "accepted",
+      "paths": ["scripts/export_public.py", "scripts/public_snapshot.py"],
+      "summary": "Publish committed blobs and policy from one pinned revision, never the dirty workspace or private development history. Isolate both source and output Git environments. Check file existence even for scanner exemptions, and validate Windows batch checkout attributes. Scan results are not comprehensive DLP.",
+      "evidence": ["tests/test_public_snapshot_20261014.py", "tests/test_submission_export_pipeline_20261014.py"],
+      "origin": "ADR 0024; source/export integration regressions."
+    },
+    {
+      "id": "unknown-is-not-a-retry",
+      "status": "accepted",
+      "paths": ["bus_guard.py", "bus_guard_process.py", "plugins/desktop-notify/*"],
+      "summary": "Distinguish a confirmed failure from an unknown outcome. Missing process identity is not permission to spawn, and an uncertain notification result is not permission to resend. Preserve existing processes and records while escalating uncertainty.",
+      "evidence": ["tests/test_guard_replica_singleton_20261014.py", "tests/test_desktop_notify_durable_20261013.py"],
+      "origin": "ADR 0019 and ADR 0022."
+    },
+    {
+      "id": "temporary-tests-include-lease",
+      "status": "accepted",
+      "paths": ["bus_lead_notify.py", "tests/test_lead_events*"],
+      "summary": "A temporary event directory alone does not isolate a test that reads a global lease. Isolate the complete dependency and preserve assertions. Use equivalent synthetic state on baseline and candidate to distinguish existing environment dependence from a new regression.",
+      "evidence": ["tests/test_lead_events_2c14.py", "tests/test_lead_events_quiet_20261003.py"],
+      "origin": "Verified fixture isolation in reliability integration."
+    }
+  ]
+}

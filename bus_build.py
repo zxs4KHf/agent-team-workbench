@@ -62,13 +62,18 @@ def save_record(task_id: str, data: dict):
     B.write_json(record_path(task_id), data)
 
 
-def open_worktrees(task_id: str, teammates: list, project_dir: str) -> dict:
+def open_worktrees(task_id: str, teammates: list, project_dir: str, *, review_brief=None) -> dict:
     # 为每个Agent建 worktree：<repo>/.wt/<task_id>/<teammate>，分支 task/<task_id>/<teammate>，基于当前 HEAD
+    if review_brief is not None:
+        from bus_review_context import checked_brief
+        review_brief = checked_brief(review_brief)
     repo = ensure_repo(project_dir)
     base = git(repo, "rev-parse", "HEAD").strip()
     wt_root = os.path.join(repo, policy("worktree_dir", ".wt"), task_id)
     os.makedirs(wt_root, exist_ok=True)
     rec = {"task_id": task_id, "repo": repo, "base": base, "created": B.now_iso(), "teammates": {}, "status": "building"}
+    if review_brief is not None:
+        rec["review_brief"] = review_brief
     for name in teammates:
         path = os.path.join(wt_root, name)
         branch = safe_branch(task_id, name)

@@ -34,3 +34,5 @@
 - [0023 施工提交失败不得归档](0023-build-submission-failure-is-not-an-answer.md)：保留领取与私有草稿，修复后可重试。
 
 - [0024 固定提交公开快照](0024-fixed-public-snapshot.md)：隔离快照与隐私扫描，不读取工作区正文，不携带开发历史。
+
+- [0025 Humanize 方法融入原生审查](0025-humanize-methods-in-native-review.md)

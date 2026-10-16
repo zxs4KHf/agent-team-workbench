@@ -56,6 +56,9 @@ def review_pack(task_id, teammate, max_chars=60000, target=None):
               'Reply first line PASS or RETURN. Do not edit the builder workspace. '
               'A PASS applies only to the exact commit above, never to a later branch tip.\n\n')
     import json
+    from bus_review_context import render
+    changed = _git(rec['repo'], 'diff', '--name-only', '--no-renames', '-z', target['base'], commit).split('\0')
+    header += render(rec, teammate, [p for p in changed if p], BB.B.ROOT)
     header += '## Reported builder gates (verify, do not assume)\n' + json.dumps(tm.get('gates', {}), ensure_ascii=False) + '\n\n## Diff\n```diff\n'
     if len(diff) > max_chars:
         # 723c：截断时审查者看不到后面的文件，曾据此断言「提交里没有某文件」。包头写清楚截了多少，并附完整文件清单
@@ -102,6 +105,8 @@ def set_review(task_id, teammate, verdict, reviewer, note='', expected_commit=''
         tm.update(review=verdict, reviewer=reviewer, review_note=note,
                   reviewed_commit=expected, review_at=BB.B.now_iso(),
                   review_main=head.stdout.strip() if head.returncode == 0 else '')
+        from bus_review_context import capture_review
+        capture_review(tm, expected, verdict, reviewer, note, tm['review_at'])
         BB.save_record(task_id, rec)
         return tm
 
