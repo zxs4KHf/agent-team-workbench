@@ -4,17 +4,17 @@
   "version": "0.1.0",
   "api": "workbench-plugin/1",
   "kind": "notifier",
-  "description": "有决策等你拍板、施工落地、收件箱新增、插件崩溃时，在 Windows 右下角弹通知。只读事件，不做任何操作；默认关闭。",
+  "description": "有决策等你拍板、施工落地、收件箱新增、插件崩溃、直连 Agent 等你批准时，在 Windows 右下角弹通知。只读事件，不做任何操作；默认关闭。",
   "entry": ["python", "main.py"],
   "config": {
-    "types": ["decision.merged", "decision.landed", "intake.added", "plugin.gave_up"],
+    "types": ["decision.merged", "decision.landed", "intake.added", "plugin.gave_up", "direct.approval_requested"],
     "batch_sec": 20,
     "max_per_hour": 12,
     "quiet_hours": "",
     "poll_sec": 5
   },
   "config_help": {
-    "types": "要通知的事件类型。可选：decision.merged（待拍板）/ decision.landed（施工落地）/ intake.added（收件箱新增）/ plugin.gave_up（插件反复崩溃）",
+    "types": "要通知的事件类型。可选：decision.merged（待拍板）/ decision.landed（施工落地）/ intake.added（收件箱新增）/ plugin.gave_up（插件反复崩溃）/ direct.approval_requested（直连 Agent 等你批准）",
     "batch_sec": "攒多少秒再发：这段时间内的多条事件合成一条通知，避免刷屏",
     "max_per_hour": "每小时最多弹几条；超出的只记日志",
     "quiet_hours": "免打扰时段，如 23-8（23 点到次日 8 点不弹，只记日志）；留空＝不设",

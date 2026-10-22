@@ -1,0 +1,7 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>直连 Agent</title>
+<script>
+// 直连 Agent 已并回工作台 Agent 页（2026-10-22）；保留这个地址只为旧链接不失效
+var t = location.hash.slice(1);
+location.replace('/?view=peers' + (t === 'approvals' ? '&direct=approvals' : ''));
+</script></head><body><a href="/?view=peers">直连 Agent 在工作台的 Agent 页</a></body></html>

@@ -283,18 +283,31 @@ async def run(argv: Sequence[str], *, cwd: str, timeout: float, env: Optional[di
             raise
         finally:
             # Give pumps a moment to drain what is left, then stop them.
+            # Not wait_for(gather(...)): if a second cancel lands here (MCP session teardown
+            # cancels again), the gather future ends holding CancelledError that nobody reads
+            # ("_GatheringFuture exception was never retrieved", 100+ times in the MCP log), and
+            # the CancelledError escaping this finally skipped _close(job) below.
+            recancel = False
             try:
-                await asyncio.wait_for(asyncio.gather(*pumps, return_exceptions=True), timeout=3)
-            except asyncio.TimeoutError:
-                for t in pumps:
-                    t.cancel()
-            if proc.returncode is None:
+                _done, pending = await asyncio.wait(pumps, timeout=3)
+            except asyncio.CancelledError:
+                pending, recancel = pumps, True
+            for t in pending:
+                t.cancel()
+            for t in pumps:
+                if t.done() and not t.cancelled():
+                    t.exception()  # consume, so a failed pump is not reported as never retrieved
+            if proc.returncode is None and not recancel:
                 try:
                     await asyncio.wait_for(proc.wait(), timeout=5)
                 except asyncio.TimeoutError:
                     pass
+                except asyncio.CancelledError:
+                    recancel = True
             if job is not None:
                 _close(job)  # KILL_ON_JOB_CLOSE reaps any straggler
+            if recancel:
+                raise asyncio.CancelledError
 
         text = tail.text()
         if err_tail is not None and err_tail.buf:

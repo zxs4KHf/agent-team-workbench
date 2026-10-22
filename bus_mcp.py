@@ -58,6 +58,7 @@ AUDIT_LOG = os.path.join(HERE, "console", "ws_run_audit.log")
 STARTED_AT = time.time()
 SERVICE_VERSION = "multi-leader-20261001"
 import bus_settings as SET  # noqa: E402
+import bus_direct as DIR  # noqa: E402
 
 # Identity of the caller for the current request. Set by BearerAuth from the token
 # that authenticated the request: "" for the master token, or the peer name whose
@@ -143,9 +144,11 @@ def _bind_peer(peer: str) -> tuple[str, str]:
 # ---- SDK 兼容层：mcp 1.x = FastMCP，mcp 2.x = MCPServer ----------------------------------
 try:  # mcp < 2
     from mcp.server.fastmcp import FastMCP as _Server  # type: ignore
+    from mcp.server.fastmcp.exceptions import ToolError  # type: ignore
     _SDK = 1
 except ModuleNotFoundError:  # mcp >= 2
     from mcp.server.mcpserver import MCPServer as _Server  # type: ignore
+    from mcp.server.mcpserver.exceptions import ToolError  # type: ignore
     _SDK = 2
 try:
     from mcp.server.transport_security import TransportSecuritySettings  # 两版路径相同
@@ -157,8 +160,30 @@ INSTRUCTIONS = (
     "Leader会话使用 bus_console / bus_dispatch / bus_collect / bus_status。"
     "工作区任务授权后可使用 ws_read/ws_write/ws_patch/ws_run；编辑已有文件须带 expected_version。"
     "本服务不是 ShunCode Bridge：不提供编辑器LSP/PTY等专属能力。Python/Node执行等同受信任宿主代码，不是OS沙箱。"
+    "用直连 Agent 的链接接入时只有 direct_* 工具：先调用 direct_info 读自己的文件夹、权限模式和工作守则。"
 )
-mcp = _Server("bus", instructions=INSTRUCTIONS)
+
+
+def _is_direct(identity: str) -> bool:
+    return str(identity or "").startswith(DIR.IDENTITY_PREFIX)
+
+
+class _BusServer(_Server):
+    """按连接身份分工具（2026-10-21 直连 Agent）：直连 Agent 只看得到、只调得动 direct_*；
+    Leader / 队员看不到 direct_*。只藏不拦不够——直连 Agent 若调得动 ws_* / bus_*，就绕开了自己的文件夹和审批。"""
+
+    async def list_tools(self, *args, **kwargs):
+        tools = await super().list_tools(*args, **kwargs)
+        direct = _is_direct(CURRENT_PEER.get())
+        return [t for t in tools if t.name.startswith("direct_") == direct]
+
+    async def call_tool(self, name, arguments, *args, **kwargs):
+        if str(name).startswith("direct_") != _is_direct(CURRENT_PEER.get()):
+            raise ToolError(f"工具 {name} 不对当前身份开放")
+        return await super().call_tool(name, arguments, *args, **kwargs)
+
+
+mcp = _BusServer("bus", instructions=INSTRUCTIONS)
 
 
 # ---- 复用 bus_tool.py：子进程 + stdin JSON ------------------------------------------------
@@ -374,6 +399,149 @@ async def ws_run(command: str, timeout_sec: int = 60) -> str:
     return res.render(RUN_TAIL // 1024)
 
 
+# ---- 直连 Agent 工具（2026-10-21）：只对直连 Agent 身份开放，范围与审批见 bus_direct --------------
+def _direct_tokens() -> list:
+    try:
+        return DIR.token_identities()
+    except Exception:
+        return []
+
+
+def _direct_agent():
+    a = DIR.identity_agent(CURRENT_PEER.get())
+    if not a:
+        return None, "ERROR: 这组工具只给直连 Agent 用（请用工作台里该直连 Agent 的连接链接接入）"
+    if not a.get("enabled", True):
+        return None, "ERROR: 这个直连 Agent 已在工作台停用"
+    return a, ""
+
+
+def _direct_err(a, tool: str, exc: Exception) -> str:
+    DIR._activity(a["id"], tool, f"出错：{exc}", "failed")
+    return f"ERROR: {exc}"
+
+
+@mcp.tool(name="direct_info", description=(
+    "直连 Agent 的第一步：返回你的身份、能碰的文件夹（可写 / 只读）、权限模式、相关项目背景、用户写给你的说明和工作守则。"
+    "连上后先调用一次；用户说改了配置时再调用。"))
+def direct_info() -> str:
+    a, err = _direct_agent()
+    if err:
+        return err
+    DIR._activity(a["id"], "info", "读了工作守则")
+    return DIR.system_prompt(a)
+
+
+@mcp.tool(name="direct_list", description="列出文件夹内容（跳过 .git、node_modules 等）。path：绝对路径，或相对第一个文件夹；depth 1–4。")
+async def direct_list(path: str = ".", depth: int = 1) -> str:
+    a, err = _direct_agent()
+    if err:
+        return err
+    try:
+        out = await asyncio.to_thread(DIR.list_dir, a, path, depth)
+    except (PermissionError, ValueError, OSError) as exc:
+        return _direct_err(a, "list", exc)
+    DIR._activity(a["id"], "list", path)
+    return out
+
+
+@mcp.tool(name="direct_search", description="在文件夹里搜文本（不区分大小写；regex=true 时按正则）。glob 过滤文件名如 *.py；最多返回 100 处，跳过二进制和 1 MB 以上文件。")
+async def direct_search(query: str, path: str = ".", glob: str = "", regex: bool = False) -> str:
+    a, err = _direct_agent()
+    if err:
+        return err
+    try:
+        out = await asyncio.to_thread(DIR.search, a, query, path, glob, regex)
+    except (PermissionError, ValueError, OSError, re.error) as exc:
+        return _direct_err(a, "search", exc)
+    DIR._activity(a["id"], "search", f"{query} @ {path}")
+    return out
+
+
+@mcp.tool(name="direct_read", description="读 UTF-8 文本文件，带行号和 version（改文件时要带回）。可给行范围。凭据文件（令牌、密钥、.env 等）一律拒读。")
+async def direct_read(paths: list[str], start_line: int = 1, end_line: int | None = None) -> str:
+    a, err = _direct_agent()
+    if err:
+        return err
+    out = await asyncio.to_thread(DIR.read, a, paths, start_line, end_line)
+    DIR._activity(a["id"], "read", "、".join(paths[:5]) + (f" 等 {len(paths)} 个" if len(paths) > 5 else ""))
+    return out
+
+
+@mcp.tool(name="direct_write", description=(
+    "整份写入文本文件（保留原文件的换行风格）。改已有文件必须带 direct_read 返回的 expected_version；新建填 missing。"
+    "按权限模式可能要用户批准：返回 PENDING 时用 direct_approval 取结果。why：一句话说明为什么改，会显示在审批卡上。"))
+async def direct_write(path: str, content: str, expected_version: str | None = None, why: str = "") -> str:
+    a, err = _direct_agent()
+    if err:
+        return err
+    try:
+        return await DIR.perform(a, {"kind": "write", "path": path, "content": content, "expected_version": expected_version}, why)
+    except (PermissionError, ValueError, OSError, TimeoutError) as exc:
+        return _direct_err(a, "write", exc)
+
+
+@mcp.tool(name="direct_patch", description=(
+    "精确替换：old_text 必须在文件里恰好出现一次，换成 new_text（保留原换行风格）。必须带 direct_read 返回的 expected_version。"
+    "按权限模式可能要用户批准：返回 PENDING 时用 direct_approval 取结果。why：一句话说明为什么改。"))
+async def direct_patch(path: str, old_text: str, new_text: str, expected_version: str, why: str = "") -> str:
+    a, err = _direct_agent()
+    if err:
+        return err
+    try:
+        return await DIR.perform(a, {"kind": "patch", "path": path, "old_text": old_text, "new_text": new_text,
+                                     "expected_version": expected_version}, why)
+    except (PermissionError, ValueError, OSError, TimeoutError) as exc:
+        return _direct_err(a, "patch", exc)
+
+
+@mcp.tool(name="direct_run", description=(
+    "执行一条命令（Windows 上是 PowerShell 5.1，用 ; 串联），返回退出码和输出尾部。cwd 必须在你的文件夹里，默认第一个可写文件夹。"
+    "只读命令（git status/diff/log 等）直接执行；其余按权限模式放行、等批准或拒绝；推送、建 PR 等外发命令除完全放开外总要批准。"
+    "注意：命令是宿主等权执行，不是沙箱。why：一句话说明为什么跑，会显示在审批卡上。"))
+async def direct_run(command: str, cwd: str = "", timeout_sec: int = 120, why: str = "") -> str:
+    a, err = _direct_agent()
+    if err:
+        return err
+    try:
+        return await DIR.perform(a, {"kind": "run", "command": command, "cwd": cwd, "timeout_sec": int(timeout_sec or 120)}, why)
+    except (PermissionError, ValueError, OSError, TimeoutError) as exc:
+        return _direct_err(a, "run", exc)
+
+
+@mcp.tool(name="direct_approval", description="取一条审批的结果：还在等就最多再等 wait_sec 秒（≤45）；批准后返回执行结果，拒绝则返回用户留言。")
+async def direct_approval(approval_id: str, wait_sec: int = 45) -> str:
+    a, err = _direct_agent()
+    if err:
+        return err
+    try:
+        rec = DIR.get_approval(approval_id)
+    except ValueError as exc:
+        return f"ERROR: {exc}"
+    if not rec or rec.get("agent") != a["id"]:
+        return f"ERROR: 没有这条审批：{approval_id}"
+    return await DIR.wait_approval(approval_id, wait_sec)
+
+
+@mcp.tool(name="direct_tasks", description=(
+    "工作台上用户派给你的任务。action=list 列出待办；action=done 回报某个任务做完了（task_id + result，result 写结论和验证方式）；"
+    "action=cancel 说明做不了（result 写原因）。"))
+def direct_tasks(action: str = "list", task_id: str = "", result: str = "") -> str:
+    a, err = _direct_agent()
+    if err:
+        return err
+    if action == "list":
+        return DIR.tasks_text(a["id"])
+    if action not in ("done", "cancel") or not task_id:
+        return "ERROR: action 只能是 list / done / cancel；done 和 cancel 要带 task_id"
+    try:
+        DIR.update_task(a["id"], task_id, "done" if action == "done" else "cancelled", result)
+    except ValueError as exc:
+        return f"ERROR: {exc}"
+    DIR._activity(a["id"], "task", f"{'完成' if action == 'done' else '放弃'}任务 {task_id}")
+    return f"OK: 任务 {task_id} 已标为{'完成' if action == 'done' else '放弃'}，用户会在工作台看到你的回报。"
+
+
 # ---- Bearer 鉴权中间件 + 启动 ---------------------------------------------------------------
 class BearerAuth:
     """纯 ASGI 中间件：除 /health 外所有 HTTP 请求都必须带 Authorization: Bearer <token>。
@@ -391,6 +559,9 @@ class BearerAuth:
             tok = (tok or "").strip()
             if len(tok) >= 32 and hmac.compare_digest(presented, tok.encode()):
                 return str(name)
+        for tok, who in _direct_tokens():
+            if hmac.compare_digest(presented, tok.encode()):
+                return who
         return None
 
     def _known(self):
@@ -399,6 +570,7 @@ class BearerAuth:
             tok = (tok or "").strip()
             if len(tok) >= 32:
                 yield tok, str(name)
+        yield from _direct_tokens()
 
     def _from_path(self, scope) -> tuple[str | None, str]:
         # 链接直连：/mcp/<token> 把 token 放在路径里，剥掉后交给 MCP 应用；identity 与 Bearer 相同规则。

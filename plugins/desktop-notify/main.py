@@ -22,7 +22,7 @@ _spec.loader.exec_module(_ledger)
 Ledger, LedgerError = _ledger.Ledger, _ledger.LedgerError
 CapacityError, ConflictError, LockedError = _ledger.CapacityError, _ledger.ConflictError, _ledger.LockedError
 
-LABELS = {"decision.merged": "待你拍板", "decision.landed": "施工已落地", "intake.added": "收件箱新增", "plugin.gave_up": "插件已停止"}
+LABELS = {"decision.merged": "待你拍板", "decision.landed": "施工已落地", "intake.added": "收件箱新增", "plugin.gave_up": "插件已停止", "direct.approval_requested": "直连 Agent 等你批准"}
 
 
 def describe(ev: dict):
@@ -36,6 +36,8 @@ def describe(ev: dict):
     if t == "intake.added":
         n = d.get("count")
         return t, f"{n if isinstance(n, int) and n > 0 else '若干'} 条，来自 {d.get('source') or '未知来源'}"
+    if t == "direct.approval_requested":
+        return t, f"{d.get('agent_name') or '直连 Agent'}：{str(d.get('summary') or '一项操作')[:60]}"
     if t == "plugin.gave_up":
         return t, f"{d.get('id') or '某个插件'} 反复崩溃，工作台已停止重启它"
     return None

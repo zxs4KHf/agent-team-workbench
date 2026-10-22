@@ -46,7 +46,13 @@ def main():
             out.append(f"全部回复已到齐。合并后调用 bus_status 或直接 archive：{B.archive.__name__}('{r['task_id']}')")
         print("\n".join(out))
     elif action == "console":
-        sub = a.get("action", "wait")
+        # 线上事故 2026-10-11：外部脚本把卡片 JSON 从 stdin 灌进来（无 action 字段），旧代码
+        # 默认 sub="wait"，以 controller 身份阻塞 590 秒并经 pending_commands(claim=True) 把
+        # 用户指令真的领走写 .taken，而调用方丢弃 stdout——指令每 10 分钟被退回一次。
+        # 缺 action 一律大声失败，不猜调用意图（猜出来的写操作比失败更危险）。
+        sub = a.get("action") or ""
+        if sub not in ("wait", "ack", "post", "state"):
+            raise ValueError("console 需要 action=wait|ack|post|state，缺省不再默认 wait")
         if sub == "wait":
             timeout = max(5, min(int(a.get("timeout_sec", MAX_WAIT)), MAX_WAIT))
             print(P.console_wait(timeout, a.get("peer") or "controller", session=a.get("session") or "", name=a.get("name") or ""))

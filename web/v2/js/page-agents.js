@@ -7,6 +7,7 @@ import { teamChips } from './components.js';
 import * as Prefs from './prefs.js';
 
 import { GROUP_ORDER_KEY, badge, groupOfAgent, initials } from './views2.js';
+import { directCard, directBanner } from './direct-ui.js';
 
 // 心跳迷你波形：按 last_seen 距今分钟数画一条衰减曲线，直观表现活跃度
 function heartbeat(p) {
@@ -31,9 +32,10 @@ export function renderPeers() {
   all.filter(a => !q || a.peer.includes(q) || (a.model || '').toLowerCase().includes(q) || displayName(a.peer).toLowerCase().includes(q)).forEach(a => { const g = groupOfAgent(a); (g ? buckets.get(g.id) : other).push(a); });
   const sortA = (x, y) => isOn(y) - isOn(x) || x.peer.localeCompare(y.peer);
   return `<div class="view">${head('协作阵列', 'Agent', 'Agent 按模型组归类，同组即同一模型，来源账号不重要。拖动组标题可调整顺序，默认按模型能力与使用频率排列。', `<button type="button" data-action="group-new">${icon('plus')}新建分组</button>${heldN ? `<button type="button" class="primary" data-action="reassign-held" data-peer="" title="离线 Agent 手上的单、在线却空闲的 Agent 已领未回的单，一次改派给在线 Agent">${icon('send')}一键改派 ${heldN} 单</button>` : ''}${offlineCount ? `<button type="button" data-action="wake-all" title="给掉线的 Agent 发唤醒语：Arena 中继接入的直接发进会话，其余复制后粘贴">${icon('send')}唤醒掉线的 ${offlineCount} 个</button>` : ''}${offlineCount ? `<button type="button" class="warn" data-action="peers-prune" title="清理离线超过12小时且无任务的Agent">${icon('trash')}清理离线</button>` : ''}<button type="button" data-action="join-controller">Leader 接入</button><button type="button" class="primary" data-action="join-peer">${icon('plus')}接入 Agent</button>`)}
+    ${directBanner()}
     ${opsFold(all)}
     <section class="card fit-panel" data-key="fit-peers"><div class="filters fit-head"><div class="search">${icon('search')}<input type="search" placeholder="按名称或模型搜索…" value="${attr(F.filters.peers)}" data-filter="peers" aria-label="搜索 Agent" autocomplete="off"></div><span class="result-count">${all.length} 个 Agent · ${groups.length} 组</span>${saved.length ? `<button type="button" class="small ghost" data-action="reset-group-order">恢复默认顺序</button>` : ''}</div>
-    <div class="fit-body"><div class="group-grid" id="groupSections">${groups.filter(g => !q || buckets.get(g.id).length).map(g => groupCard(g, buckets.get(g.id).sort(sortA), team)).join('')}
+    <div class="fit-body"><div class="group-grid" id="groupSections">${directCard(q)}${groups.filter(g => !q || buckets.get(g.id).length).map(g => groupCard(g, buckets.get(g.id).sort(sortA), team)).join('')}
     ${other.length ? groupCard({ id: '_other', name: '未归组', label: '', match: [] }, other.sort(sortA), team) : ''}</div></div></section>
   </div>`;
 }

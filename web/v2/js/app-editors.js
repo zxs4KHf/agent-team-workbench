@@ -13,6 +13,7 @@ import { HISTORY_NAV, HISTORY_ACTIONS, HOOKS as HIST_HOOKS, renderHistory, histo
 
 import { refresh } from './app-sync.js';
 import { teamRow } from './main.js';
+import { folderEditor } from './direct-ui.js';
 
 export function openPlanEditor() { const p = project(); if (!p) return; openDrawer({ title: '编辑下一步', subtitle: '每行一项，保存后覆盖当前项目的计划列表', body: `<form data-form="plan"><div class="field"><label for="planText">计划列表</label><textarea id="planText" name="plan" rows="10">${esc((p.next || []).join('\n'))}</textarea></div><div class="row"><button type="submit" class="primary">保存</button><button type="button" class="ghost" data-action="close-drawer">取消</button></div></form>` }); }
 // 权重下拉放在团队抽屉里（5b61 分歧点第 3 条：主看板不放常驻控件）。逐项即时保存，不走表单提交
@@ -25,8 +26,9 @@ function weightRows() {
 }
 export function openTeamEditor() { openDrawer({ title: '编辑 Team', subtitle: '预设可改可删，保存后写入当前项目', body: `<form data-form="teams" class="stack"><div id="teamRows" class="stack">${effectiveTeams().map(teamRow).join('')}</div><button type="button" class="small" data-action="add-team-row">${icon('plus')}添加 Team</button><div class="row"><button type="submit" class="primary">保存 Team</button><button type="button" class="ghost" data-action="close-drawer">取消</button></div></form>${weightRows()}` }); }
 export function openAgentEditor(peer) { openDrawer({ title: '编辑 Agent 资料', subtitle: peer, body: profileEditor(peer, S().profiles?.[peer] || {}, agentMeta(peer)) }); }
-export function openProjectForm(edit) { const p = edit ? project() : { name: '', description: '', peers: [], mode: 'independent', context_files: [] }; openDrawer({ title: edit ? '项目配置' : '新建项目', subtitle: edit ? p.slug : '保存默认团队与上下文文件', body: `<form data-form="project" data-edit="${edit ? 1 : 0}"><div class="field"><label for="projectName">项目名称</label><input id="projectName" name="name" value="${attr(p.name || p.slug || '')}" ${edit ? 'readonly aria-readonly="true" title="项目名称创建后不能改"' : 'required'} placeholder="例如：重力回廊" autocomplete="off"></div><div class="field"><label for="projectDesc">一句话说明</label><input id="projectDesc" name="description" value="${attr(p.description || '')}" autocomplete="off"></div><div class="field"><label>默认团队</label><div class="pick-grid">${agentList().map(a => `<label class="pick ${(p.peers || []).includes(a.peer) ? 'on' : ''}"><input type="checkbox" name="peers" value="${attr(a.peer)}" ${(p.peers || []).includes(a.peer) ? 'checked' : ''}><span class="t"><b>${esc(displayName(a.peer))}</b><small>${esc(a.model || '')}</small></span></label>`).join('')}</div></div><div class="field"><label for="projectDefaultTeam">默认团队（发起页缺省勾选哪一组）</label><select id="projectDefaultTeam" name="default_team">${[DYNAMIC_TEAM, PROJECT_TEAM, ...(Array.isArray(p.teams) ? p.teams.map(t => t && t.name) : [])].filter((n, i, a) => n && a.indexOf(n) === i).map(n => `<option value="${attr(n)}" ${(p.default_team || DYNAMIC_TEAM) === n ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select><span class="help">「${esc(DYNAMIC_TEAM)}」= 派发时取当前可派发者；「${esc(PROJECT_TEAM)}」= 上面勾选的默认团队成员；也可选自定义团队。</span></div><div class="field"><label for="projectMode">默认模式</label><select id="projectMode" name="mode">${['independent', 'redteam', 'relay'].map(m => `<option value="${m}" ${p.mode === m ? 'selected' : ''}>${esc(modeLabel(m))}</option>`).join('')}</select></div><div class="field"><label for="projectCtx">默认上下文文件（每行一个）</label><textarea id="projectCtx" name="context_files" rows="4" class="mono" style="font-size:calc(12px * var(--fs-scale, 1))">${esc((p.context_files || []).join('\n'))}</textarea></div><div class="row"><button type="submit" class="primary">${edit ? '保存' : '创建项目'}</button><button type="button" class="ghost" data-action="close-drawer">取消</button></div></form>` }); }
-const SHORT_NAMES = { 'gpt-6-astra': 'astra', 'claude-fable-5': 'fable', 'kimi-k3': 'kimi', 'claude-opus-5': 'opus', 'glm-5.3': 'glm', 'deepseek-flash': 'deepseek', 'qwen3.8-flash': 'qwenflash', 'qwen3.8-max': 'qwenmax', 'gemini-3.8-flash': 'gemini', 'hy4-preview': 'hy', 'grok-4.6': 'grok', 'gemini-4-pro': 'geminipro', 'gpt-5.6': 'gpt' };
+export function openProjectForm(edit) { const p = edit ? project() : { name: '', description: '', peers: [], mode: 'independent', context_files: [] }; openDrawer({ title: edit ? '项目配置' : '新建项目', subtitle: edit ? p.slug : '保存默认团队与上下文文件', body: `<form data-form="project" data-edit="${edit ? 1 : 0}"><div class="field"><label for="projectName">项目名称</label><input id="projectName" name="name" value="${attr(p.name || p.slug || '')}" ${edit ? 'readonly aria-readonly="true" title="项目名称创建后不能改"' : 'required'} placeholder="例如：重力回廊" autocomplete="off"></div><div class="field"><label for="projectDesc">一句话说明</label><input id="projectDesc" name="description" value="${attr(p.description || '')}" autocomplete="off"></div><div class="field"><label>默认团队</label><div class="pick-grid">${agentList().map(a => `<label class="pick ${(p.peers || []).includes(a.peer) ? 'on' : ''}"><input type="checkbox" name="peers" value="${attr(a.peer)}" ${(p.peers || []).includes(a.peer) ? 'checked' : ''}><span class="t"><b>${esc(displayName(a.peer))}</b><small>${esc(a.model || '')}</small></span></label>`).join('')}</div></div><div class="field"><label for="projectDefaultTeam">默认团队（发起页缺省勾选哪一组）</label><select id="projectDefaultTeam" name="default_team">${[DYNAMIC_TEAM, PROJECT_TEAM, ...(Array.isArray(p.teams) ? p.teams.map(t => t && t.name) : [])].filter((n, i, a) => n && a.indexOf(n) === i).map(n => `<option value="${attr(n)}" ${(p.default_team || DYNAMIC_TEAM) === n ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select><span class="help">「${esc(DYNAMIC_TEAM)}」= 派发时取当前可派发者；「${esc(PROJECT_TEAM)}」= 上面勾选的默认团队成员；也可选自定义团队。</span></div><div class="field"><label for="projectMode">默认模式</label><select id="projectMode" name="mode">${['independent', 'redteam', 'relay'].map(m => `<option value="${m}" ${p.mode === m ? 'selected' : ''}>${esc(modeLabel(m))}</option>`).join('')}</select></div>${edit ? `<div class="field"><label>项目文件夹</label>${folderEditor(p.folders || [], { suggest: false })}<span class="help">这个项目相关的本机目录（代码、文档、素材）。直连 Agent 的设置里能一键挑；它看项目背景时也会看到。施工仓库是另一回事，仍只能用命令行绑定</span></div>` : ''}<div class="field"><label for="projectCtx">默认上下文文件（每行一个）</label><textarea id="projectCtx" name="context_files" rows="4" class="mono" style="font-size:calc(12px * var(--fs-scale, 1))">${esc((p.context_files || []).join('\n'))}</textarea></div><div class="row"><button type="submit" class="primary">${edit ? '保存' : '创建项目'}</button><button type="button" class="ghost" data-action="close-drawer">取消</button></div></form>` }); }
+export const SHORT_NAMES = { 'gpt-6-astra': 'astra', 'claude-fable-5': 'fable', 'kimi-k3': 'kimi', 'claude-opus-5': 'opus', 'glm-5.3': 'glm', 'deepseek-flash': 'deepseek', 'qwen3.8-flash': 'qwenflash', 'qwen3.8-max': 'qwenmax', 'gemini-3.8-flash': 'gemini', 'hy4-preview': 'hy', 'grok-4.6': 'grok', 'gemini-4-pro': 'geminipro', 'gpt-5.6': 'gpt' };
+const canon = m => String(m || '').toLowerCase().split(' · ')[0].replace(/^.*\//, '').replace(/[_ ]/g, '-');
 export function nextPeerName(model) {
   // 自动命名：先沿用同模型已有 Agent 的命名规律（sol-6-1…sol-6-5 → sol-6-6）；没有再用模型组短名（astra、fable、kimi…）加递增序号；
   // 未知模型取名字里最有辨识度的词；数字结尾的短名加连字符避免与序号混淆
@@ -34,10 +36,12 @@ export function nextPeerName(model) {
   agentList().filter(a => model && a.model === model).forEach(a => { const m = a.peer.match(/^(.*?\D)(\d+)$/); if (m) learned.set(m[1], Math.max(learned.get(m[1]) || 0, Number(m[2]))); });
   if (learned.size) { const [pre, max] = [...learned].sort((x, y) => y[1] - x[1])[0]; for (let i = max + 1; i < max + 1000; i++) if (!taken.has(pre + i)) return pre + i; }
   const g = groupOfModel(model); const id = (g ? g.id : String(model || 'agent')).toLowerCase();
-  let base = SHORT_NAMES[id];
+  const mKey = canon(model);
+  let base = SHORT_NAMES[mKey] || SHORT_NAMES[model] || SHORT_NAMES[id];
   if (!base) {
     const vendor = new Set(['claude', 'gpt', 'gemini', 'openai', 'google', 'anthropic', 'zai', 'org', 'preview', 'flash', 'series', 'pro', 'max']);
-    const parts = id.split(/[-_\s]+/).filter(Boolean);
+    const target = String(model || id).toLowerCase();
+    const parts = target.split(/[-_\s]+/).filter(Boolean);
     base = (parts.filter(w => !vendor.has(w) && /[a-z]/.test(w)).map(w => w.replace(/[\d.]+$/, '')).find(Boolean) || parts[0] || 'agent').replace(/[^a-z0-9]/g, '').slice(0, 12) || 'agent';
   }
   if (/\d$/.test(base)) base += '-';
@@ -88,10 +92,14 @@ function joinNameHint() {
     : model ? `按模型自动编号${same.length ? `；这个模型已有 ${same.slice(0, 6).join('、')}${same.length > 6 ? ` 等 ${same.length} 个` : ''}` : ''}${sugg.length > 1 ? `；也可以用 ${sugg.slice(1).join('、')}` : ''}。`
     : '先选模型，名称会自动编号。';
 }
-// 组卡片「接入」传的是分组前缀（如 claude-opus）：换成这一组里实际用得最多的具体模型；没人用就保持前缀
-function preferredModel(model) {
+// 组卡片「接入」传的是分组前缀（如 claude-opus）：换成这一组里实际用得最多的具体模型；显式具体模型或没人用就保持原样
+export function preferredModel(model) {
   if (!model || agentList().some(a => a.model === model)) return model;
+  const k = canon(model);
+  if (SHORT_NAMES[model] || SHORT_NAMES[k]) return model;
   const g = groupOfModel(model); if (!g) return model;
+  const isPrefix = (g.match || []).some(m => canon(m) === k) || canon(g.id) === k;
+  if (!isPrefix) return model;
   const hit = commonModels().find(m => m.n > 0 && groupOfModel(m.model)?.id === g.id);
   return hit ? hit.model : model;
 }
