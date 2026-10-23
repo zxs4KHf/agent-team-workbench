@@ -38,7 +38,8 @@ def free_port():
 
 class Base(unittest.TestCase):
     def setUp(self):
-        self.root = tempfile.mkdtemp(prefix="da-", dir=TMP)
+        # realpath：CI 的临时目录是 8.3 短名（RUNNER~1），被测代码按真实长路径比较与返回
+        self.root = os.path.realpath(tempfile.mkdtemp(prefix="da-", dir=TMP))
         self.rw = os.path.join(self.root, "repo")
         self.ro = os.path.join(self.root, "docs")
         self.out = os.path.join(self.root, "outside")
