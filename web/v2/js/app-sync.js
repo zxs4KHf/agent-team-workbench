@@ -24,7 +24,9 @@ function stateKey(s) {
     (s.peers || []).map(p => p.label || ''), s.profiles || {}, Object.entries(s.pending_labels || {}), s.features ? [s.features.lead_label !== false] : '',
     // 多活 Leader：有人接入 / 离开 / 开始处理指令 / 出现孤儿指令都要重画（顶栏人数与 Leader 面板）
     (s.leaders || []).map(r => [r.session, r.label, (r.claimed || []).length]), s.leader_queue ? [s.leader_queue.pending, s.leader_queue.claimed, s.leader_queue.orphaned] : '',
-    s.allocator ? [s.allocator.mode, s.allocator.last_plan && s.allocator.last_plan.time] : '']);
+    s.allocator ? [s.allocator.mode, s.allocator.last_plan && s.allocator.last_plan.time] : '',
+    // 直连 Agent 卡片与待批提醒（ADR 0026）：最近活动只取「连没连过」，它每调一次工具都变，放进来会让整页跟着它的操作反复重画
+    s.direct ? [s.direct.pending, (s.direct.list || []).map(a => [a.id, a.name, a.mode, a.enabled, a.pending, a.open_tasks, a.folders, !!a.last_seen])] : '']);
   const events = JSON.stringify([(s.lead_events_open || []).map(e => [e.id, e.count, e.acked, e.pending_handback ? 1 : 0, e.unstable ? 1 : 0, e.epoch || '', e.from || '', e.to || '', e.reason || '', e.at || '']), s.features ? s.features.lead_events !== false : true]);
   const order = JSON.stringify([pr.rev || '', (pr.task_order || []).join(','), Object.keys(w).sort().map(k => `${k}:${w[k]}`).join(',')]);
   const leader = JSON.stringify([l.holder || '', l.epoch || '', l.expires || '']);

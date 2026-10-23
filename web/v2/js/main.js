@@ -14,15 +14,16 @@ import { PREF_ACTIONS, renderBrand, setMarkFromFile } from './app-brand.js';
 import { hideTask, loadSettings, reviewNow, saveInline, saveSettings, sendCommand, unhideTask } from './app-commands.js';
 import { addAttachments, composerStateChanged, openDispatch, releaseAttachments, renderTray, submitComposer, submitDispatch, syncComposer } from './app-composer.js';
 import { loadMerge, openCommand, openDecision, openFiles, openLeadDetail, openPreview, openTask, reconcileMerges } from './app-drawers.js';
-import { nextPeerName, openAgentEditor, openJoin, openPlanEditor, openProjectForm, openTeamEditor, saveLabel } from './app-editors.js';
+import { nextPeerName, openAgentEditor, openJoin, openPlanEditor, openProjectForm, openTeamEditor, preferredModel, saveLabel } from './app-editors.js';
 import { openRedispatch } from './app-redispatch.js';
+import { DIRECT_ACTIONS, DIRECT_FORMS, DIRECT_HOOKS, openDirectFromUrl, readFolders } from './direct-ui.js';
 import { connectLive, refresh } from './app-sync.js';
 import { loadWakeBound, openWakeAll, wakeAutoAll, wakePeer } from './app-wake.js';
 export { renderBrand, PREF_ACTIONS, setMarkFromFile } from './app-brand.js';
 export { hideTask, unhideTask, sendCommand, reviewNow, loadSettings, saveSettings, saveInline } from './app-commands.js';
 export { renderTray, addAttachments, releaseAttachments, submitComposer, submitDispatch, openDispatch, syncComposer, composerStateChanged } from './app-composer.js';
 export { openLeadDetail, loadMerge, reconcileMerges, openTask, openDecision, openCommand, openPreview, openFiles } from './app-drawers.js';
-export { openPlanEditor, openTeamEditor, openAgentEditor, openProjectForm, nextPeerName, saveLabel, openJoin } from './app-editors.js';
+export { openPlanEditor, openTeamEditor, openAgentEditor, openProjectForm, nextPeerName, saveLabel, openJoin, preferredModel } from './app-editors.js';
 export { openRedispatch } from './app-redispatch.js';
 export { refresh, connectLive } from './app-sync.js';
 export { wakePeer, openWakeAll } from './app-wake.js';
@@ -447,7 +448,7 @@ const FORMS = {
   teams: async form => { const teams = $$('[data-team-row]', form).map(r => ({ name: $('[data-team-field="name"]', r).value.trim(), peers: $('[data-team-field="peers"]', r).value.split(',').map(x => x.trim()).filter(Boolean), mode: $('[data-team-field="mode"]', r).value, note: $('[data-team-field="note"]', r).value.trim() })).filter(t => t.name); try { await api('/api/project/update', { method: 'POST', body: JSON.stringify({ slug: S().project, teams }) }); closeDrawer(); toast('Team 已保存', 'ok'); refresh(true); } catch (e) { notify.error(e); } },
   'agent-profile': async form => { const button = form.querySelector('[type=submit]'); button.disabled = true; try { await api('/api/profile', { method: 'POST', body: JSON.stringify({ peer: form.dataset.peer, ...profilePatch(form) }) }); await refresh(true); toast('全局 Agent 资料已保存', 'ok'); } catch (error) { notify.error(error); } finally { button.disabled = false; } },
   'agent-meta': async form => { const p = project(); const fd = new FormData(form); const agent_meta = { [form.dataset.peer]: { display_name: String(fd.get('display_name') || '').trim(), note: String(fd.get('note') || '').trim(), paused_in_project: fd.get('paused_in_project') === 'on' } }; try { await api('/api/project/update', { method: 'POST', body: JSON.stringify({ slug: p.slug, agent_meta }) }); closeDrawer(); toast('Agent 资料已保存', 'ok'); refresh(true); } catch (e) { notify.error(e); } },
-  project: async form => { const edit = form.dataset.edit === '1'; const fd = new FormData(form); const payload = { name: String(fd.get('name') || '').trim(), description: String(fd.get('description') || '').trim(), peers: fd.getAll('peers'), mode: String(fd.get('mode') || 'independent'), context_files: String(fd.get('context_files') || '').split(/\r?\n/).map(x => x.trim()).filter(Boolean), default_team: String(fd.get('default_team') || '') }; if (!edit && !payload.name) return toast('项目名称不能为空', 'warn'); try { const r = edit ? await api('/api/project/update', { method: 'POST', body: JSON.stringify({ ...payload, slug: S().project }) }) : await api('/api/project', { method: 'POST', body: JSON.stringify(payload) }); closeDrawer(); toast(edit ? '项目已保存' : '项目已创建', 'ok'); await refresh(true); if (r.slug) store.set({ project: r.slug }); } catch (e) { notify.error(e); } },
+  project: async form => { const edit = form.dataset.edit === '1'; const fd = new FormData(form); const payload = { name: String(fd.get('name') || '').trim(), description: String(fd.get('description') || '').trim(), peers: fd.getAll('peers'), mode: String(fd.get('mode') || 'independent'), context_files: String(fd.get('context_files') || '').split(/\r?\n/).map(x => x.trim()).filter(Boolean), default_team: String(fd.get('default_team') || ''), ...(edit ? { folders: readFolders(form) } : {}) }; if (!edit && !payload.name) return toast('项目名称不能为空', 'warn'); try { const r = edit ? await api('/api/project/update', { method: 'POST', body: JSON.stringify({ ...payload, slug: S().project }) }) : await api('/api/project', { method: 'POST', body: JSON.stringify(payload) }); closeDrawer(); toast(edit ? '项目已保存' : '项目已创建', 'ok'); await refresh(true); if (r.slug) store.set({ project: r.slug }); } catch (e) { notify.error(e); } },
   join: async () => {},
   join_legacy: async form => { const kind = form.dataset.kind, fd = new FormData(form), peer = String(fd.get('peer') || '').trim(), model = String(fd.get('model') || '').trim(); if (kind !== 'controller' && (!peer || !model)) return toast('Agent 名称和模型名称不能为空', 'warn'); try { const text = await textApi(`/api/prompt?${new URLSearchParams({ kind, ...(kind === 'controller' ? {} : { peer, model }) })}`); $('#promptResult').innerHTML = `<div class="field fade-up"><label for="promptText">接入提示词</label><textarea id="promptText" class="mono" style="min-height:300px;font-size:calc(12px * var(--fs-scale, 1))" readonly>${esc(text)}</textarea></div><button type="button" class="small" data-action="copy-prompt">${icon('copy')}复制提示词</button>`; } catch (e) { notify.error(e); } },
   'relay-order': async form => { const order = $('#relayOrder', form).value.split(/\n/).map(x => x.trim()).filter(Boolean); if (await commitRelayOrder(order)) closeDrawer(); },
@@ -677,9 +678,11 @@ function openEntityFromUrl() {
   if (!VIEWS[S().view]) store.set({ view: 'overview' });
   if (url.get('view', '') !== S().view) url.set({ view: S().view }, true);
   bind(); renderShell(S()); renderView(S()); startHistoryView(S().view); loadPluginPages();
-  refresh(true).then(() => { connectLive(); setTimeout(() => document.body.classList.add('settled'), 900); openEntityFromUrl(); });
+  refresh(true).then(() => { connectLive(); setTimeout(() => document.body.classList.add('settled'), 900); openEntityFromUrl() || openDirectFromUrl(); });
   setInterval(tickCountdown, 1000);
 })();
+// 直连 Agent（ADR 0026）：动作、表单都在 direct-ui.js，这里只挂进全站的委托表
+Object.assign(ACTIONS, DIRECT_ACTIONS); Object.assign(FORMS, DIRECT_FORMS); DIRECT_HOOKS.refresh = () => refresh(true);
 
 Object.assign(ACTIONS, {
   'open-redispatch': t => openRedispatch(t.dataset.id),

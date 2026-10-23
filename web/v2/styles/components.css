@@ -654,3 +654,23 @@ label.row:has(>input[type=checkbox])>input,label.row:has(>input[type=radio])>inp
 .view-actions{display:flex;flex-wrap:wrap;gap:var(--sp-2);justify-content:flex-end}
 .view-actions>button{white-space:nowrap}
 @media(max-width:760px){.view-actions{justify-content:flex-start}}
+
+/* 直连 Agent（ADR 0025，2026-10-22 并回工作台）：Agent 页分组卡 + 抽屉。只补抽屉里的文件夹行、模式卡和代码块，其余复用现有组件 */
+.direct-folder{display:grid;grid-template-columns:minmax(0,1fr) 88px minmax(0,150px) auto;gap:var(--sp-1);align-items:center}
+.direct-folder-add{gap:var(--sp-1)}
+.direct-modes{grid-template-columns:repeat(auto-fill,minmax(170px,1fr))}
+.direct-modes .pick{align-items:flex-start}
+.direct-modes .pick .t small{font-family:inherit;white-space:normal;line-height:1.5;margin-top:2px}
+.direct-modes .pick.risky.on{border-color:var(--warn);background:var(--warn-soft)}
+.direct-code{font-family:var(--mono);background:var(--surface-2);border:1px solid var(--line);border-radius:var(--r-ctl);padding:var(--sp-2);max-height:320px;overflow:auto}
+.direct-more>summary{cursor:pointer}
+.direct-more-body{margin-top:var(--sp-2)}
+.direct-text{white-space:pre-wrap;overflow-wrap:anywhere;font-size:var(--fs-1)}
+.direct-result{border-left:2px solid var(--accent);padding-left:var(--sp-2)}
+.direct-ap-title{overflow-wrap:anywhere}
+.direct-step{margin:0}
+.direct-decide input{min-width:180px}
+/* 派任务是抽屉中段的小表单：不要套用「提交行吸底」 */
+.drawer-body form.direct-task-form>.row:has(>button[type=submit]){position:static;margin:0;padding:0;background:none;border-top:0}
+.direct-drawer .grid-2{align-items:start}
+@media (max-width:640px){.direct-folder{grid-template-columns:minmax(0,1fr) auto}.direct-folder [name=fpath]{grid-column:1 / -1}}

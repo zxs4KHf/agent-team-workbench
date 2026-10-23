@@ -303,7 +303,7 @@ def update_project(slug: str, patch: dict) -> dict:
     """Small validated patches, applied under the same lock as all project writes."""
     if not isinstance(patch, dict):
         raise ValueError('Project patch must be an object')
-    allowed = {'name', 'description', 'peers', 'mode', 'context_files', 'next', 'agent_meta', 'teams', 'default_team'}
+    allowed = {'name', 'description', 'peers', 'mode', 'context_files', 'next', 'agent_meta', 'teams', 'default_team', 'folders'}
     unknown = set(patch) - allowed - {'slug'}
     if unknown:
         raise ValueError('Unknown project fields: ' + ', '.join(sorted(unknown)))
@@ -327,6 +327,10 @@ def update_project(slug: str, patch: dict) -> dict:
         check_teams(clean['teams'])
     if 'default_team' in clean and not isinstance(clean['default_team'], str):
         raise ValueError('default_team must be text')
+    if 'folders' in clean:
+        # 项目文件夹（2026-10-21）：项目相关的本机目录，直连 Agent 从这里挑；与施工仓库 repo_dir 无关，repo_dir 仍只能走 bind_project_repo
+        import bus_direct as DIR
+        clean['folders'] = DIR.normalize_folders(clean['folders'])
     p = load_project(slug)
     for key, value in clean.items():
         if key == 'agent_meta':
@@ -1847,6 +1851,15 @@ def _post_impl(slug: str, task_id: str = "", status: str = "", title: str = "", 
 _STATE_CACHE = {"at": 0.0, "data": None}
 
 
+def _direct_summary() -> dict:
+    """直连 Agent 的计数（Agent 页的入口和导航角标用）；详情走 GET /api/direct。读失败不挡整页状态。"""
+    try:
+        import bus_direct as DIR
+        return DIR.summary()
+    except Exception:
+        return {"agents": 0, "pending": 0, "list": []}
+
+
 def full_state() -> dict:
     if _STATE_CACHE["data"] is not None and time.time() - _STATE_CACHE["at"] < 1.0:
         return _STATE_CACHE["data"]
@@ -2552,7 +2565,7 @@ def _full_state() -> dict:
             controller["status"] = "relay"
     return {"time": B.now_iso(), "workspace_root": B.WORKSPACE, "landing": _land_summary(), "peers": peers, "controller": controller, "projects": projects, "bridge_url": bridge_url(),
             "lease": B.lease(), "priority": B.priority(), "relay_order_effective": B.relay_order_peers(), "relay_resolution": B.relay_resolution(),
-            "profiles": B.profiles_all(),
+            "profiles": B.profiles_all(), "direct": _direct_summary(),
             "commands": pending_commands() + claimed_commands(), "recent_done": recent_done(10), "open_tasks": B.status()["open_tasks"],
             "nudges": load_nudges(), "builders": snap["builders"], "agent_vocab": B.agent_vocab(),
             "lead_events_open": B.lead_events_open(), "features": B.LN.features(B.ROOT), "pending_labels": _pending_labels(),

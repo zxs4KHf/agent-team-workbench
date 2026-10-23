@@ -20,6 +20,21 @@ import bus_projects as P  # noqa: E402
 import bus_settings as SET  # noqa: E402
 import named_workspace_io as W  # noqa: E402  shares the credential deny-list with the MCP file tools
 import bus_events as E  # noqa: E402  events-v1 事件记录（docs/adr/0003）
+
+# 浏览器关页、SSE 重连、反向代理超时都会让连接在写响应时断开：这是常态不是故障。
+# 以前整段打堆栈（2026-10-22 统计 workbench_8765.log 里 1180 多段都是它），还会再往死连接上写一次 400，把真报错埋掉。
+CLIENT_GONE = (ConnectionAbortedError, ConnectionResetError, BrokenPipeError)
+
+
+class QuietServer(ThreadingHTTPServer):
+    # socketserver 默认 listen 队列只有 5：页面一次拉十几个 ES 模块再加 SSE 长连接，队列满了 Windows 直接拒连，
+    # 模块加载失败页面就半残（2026-10-22 体检在 8765 上抓到 direct-ui.js、idiomorph 等 ERR_CONNECTION_REFUSED）
+    request_queue_size = 128
+
+    def handle_error(self, request, client_address):
+        if isinstance(sys.exc_info()[1], CLIENT_GONE):
+            return
+        super().handle_error(request, client_address)
 import bus_feedback as FB  # noqa: E402  体验反馈
 import bus_intake as IN  # noqa: E402  外部来源收件箱
 import bus_review as RV  # noqa: E402  立即派审查（催审 / 全部催审）
@@ -28,6 +43,7 @@ import bus_history as HIST  # noqa: E402  任务历史只读分页（3847）
 import bus_plugins as PL  # noqa: E402  插件管理（docs/PLUGINS.md）
 import bus_plugin_jobs as PJ  # noqa: E402  插件任务派发
 import bus_wake as WK  # noqa: E402  唤醒掉线的 Agent
+import bus_direct as DIR  # noqa: E402  直连 Agent（配置、审批、任务）
 from urllib.parse import unquote as _unquote  # noqa: E402
 
 WEB = os.path.join(B.ROOT, "web")
@@ -271,6 +287,39 @@ class Handler(BaseHTTPRequestHandler):
             self.close_connection = True
             self.send_json({"error": why}, 403)
         return ok
+
+    def direct_link(self, agent_id: str) -> dict:
+        a = DIR.get(agent_id)
+        if not a:
+            raise ValueError(f"没有这个直连 Agent：{agent_id}")
+        tok = a.get("token") or ""
+        base = P.bridge_base(P.mcp_base())
+        url = f"{base}/mcp/{tok}"
+        local = f"{P.LOCAL_MCP}/mcp"
+        prompt = (f"连接 MCP：{url}\n（本机的 Claude 桌面 / Claude Code / Codex 也可以用 {local}，请求头 Authorization: Bearer <令牌>）\n\n"
+                  f"你是我的直连 Agent「{a.get('name')}」。连上后先调用 direct_info，读你能用的文件夹、权限模式和工作守则，"
+                  "之后按守则做事；我会直接在这个窗口里给你派活。现在先调用 direct_info，然后用两三句话告诉我你能做什么。")
+        cfg = {"mcpServers": {"workbench-direct": {"type": "streamable-http", "url": local, "headers": {"Authorization": f"Bearer {tok}"}}}}
+        return {"id": agent_id, "name": a.get("name"), "url": url, "local_url": local, "prompt": prompt,
+                "config": json.dumps(cfg, ensure_ascii=False, indent=2),
+                "claude_cmd": f'claude mcp add --transport http workbench-direct {local} --header "Authorization: Bearer {tok}"'}
+
+    def direct_post(self, action: str, body: dict) -> dict:
+        """直连 Agent 的写接口。业务全在 bus_direct，这里只分发。"""
+        if action == "save":
+            return DIR.save(body)
+        if action == "delete":
+            return DIR.delete(str(body.get("id") or ""))
+        if action == "rotate":
+            return DIR.rotate_token(str(body.get("id") or ""))
+        if action == "decide":
+            return DIR.decide(str(body.get("id") or ""), str(body.get("decision") or ""), str(body.get("note") or ""))
+        if action == "task":
+            return DIR.add_task(str(body.get("agent") or ""), str(body.get("text") or ""))
+        if action == "task-update":
+            return DIR.update_task(str(body.get("agent") or ""), str(body.get("task_id") or ""), str(body.get("status") or ""),
+                                   str(body.get("result") or ""))
+        raise ValueError(f"未知操作 /api/direct/{action}")
 
     def guard_state(self) -> dict:
         st = B.read_json(os.path.join(B.ROOT, "console", "guard_status.json"), None) or {}
@@ -571,6 +620,13 @@ class Handler(BaseHTTPRequestHandler):
                                            "code": "file_not_found", "path": rel}, 404)
                 with open(full, encoding="utf-8") as f:
                     return self.send_text(f.read())
+            if u.path == "/api/direct":
+                return self.send_json(DIR.overview())
+            if u.path == "/api/direct/link":
+                # 直连 Agent 的接入链接含令牌：同 connect_link，只对本机回环返回
+                if self.client_address[0] not in ("127.0.0.1", "::1"):
+                    return self.send_json({"error": "只允许本机获取"}, 403)
+                return self.send_json(self.direct_link(q.get("id", "")))
             if u.path == "/api/connect_link":
                 # 链接直连：URL 里带 token，复制到宿主的 MCP 配置即可；只对本机回环返回
                 if self.client_address[0] not in ("127.0.0.1", "::1"):
@@ -643,6 +699,8 @@ class Handler(BaseHTTPRequestHandler):
             if target:
                 return self.proxy_plugin(target, "GET", u.path + ("?" + u.query if u.query else ""), None)
             return self.send_text("not found", code=404)
+        except CLIENT_GONE:
+            return None
         except PathError as e:
             # 必须排在 Exception 之前：越界/拒绝名单各有状态码与 code，不再一律 400（980a 必改 3）
             return self.send_json({"error": str(e), "code": e.code}, e.status)
@@ -1063,6 +1121,8 @@ class Handler(BaseHTTPRequestHandler):
                 # 待落地页批量处理一类：rework 重新派施工 / drop 不再落地 / rereview 重新审查（bus_land）
                 import bus_land as LD
                 return self.send_json(LD.bulk(str(body.get("cat") or ""), str(body.get("action") or ""), by="user"))
+            if u.path.startswith("/api/direct/"):
+                return self.send_json(self.direct_post(u.path[len("/api/direct/"):], body or {}))
             if u.path == "/api/project/update":
                 p = P.update_project(body["slug"], body)
                 return self.send_json(p)
@@ -1070,8 +1130,11 @@ class Handler(BaseHTTPRequestHandler):
             if target:
                 return self.proxy_plugin(target, "POST", u.path, json.dumps(body, ensure_ascii=False).encode("utf-8"))
             return self.send_text("not found", code=404)
+        except CLIENT_GONE:
+            return None
         except Exception as e:
             return self.send_json({"error": str(e)}, 400)
+
 
 
 def main():
@@ -1086,6 +1149,9 @@ def main():
     for d in (E.EVENTS, IN.INTAKE, FB.FEEDBACK):
         os.makedirs(d, exist_ok=True)
     WATCH_DIRS = WATCH_DIRS + (IN.INTAKE, FB.FEEDBACK)  # 收件箱/反馈变化也推 SSE，页面实时刷新
+    for d in (DIR.DIRECT_DIR, DIR.APPROVALS, DIR.TASKS):
+        os.makedirs(d, exist_ok=True)
+    WATCH_DIRS = WATCH_DIRS + (DIR.DIRECT_DIR, DIR.APPROVALS, DIR.TASKS)  # 直连 Agent 的配置、审批、任务（活动记录太频繁，不推，页面自己轮询）
     if a.host not in ("0.0.0.0", "::", ""):
         if a.host.count(":") > 1:       # 裸 IPv6：浏览器发的 Host 是 [addr]:port，两种写法都放行
             ALLOWED_HOSTS.update({a.host.lower().strip("[]"), "[" + a.host.lower().strip("[]") + "]"})
@@ -1096,7 +1162,7 @@ def main():
     deadline = time.time() + 90
     while True:
         try:
-            srv = ThreadingHTTPServer((a.host, a.port), Handler)
+            srv = QuietServer((a.host, a.port), Handler)
             break
         except OSError:
             if time.time() >= deadline:

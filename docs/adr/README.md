@@ -36,3 +36,4 @@
 - [0024 固定提交公开快照](0024-fixed-public-snapshot.md)：隔离快照与隐私扫描，不读取工作区正文，不携带开发历史。
 
 - [0025 Humanize 方法融入原生审查](0025-humanize-methods-in-native-review.md)
+- [0026 直连 Agent](0026-direct-agent.md)：外部窗口用自己的令牌接入，只能用 direct_* 工具；文件夹清单、四档权限、绑定内容的一次性审批；项目新增可编辑的文件夹清单。
